@@ -1,0 +1,37 @@
+{
+  "active_features": [
+    "price_acceleration_factor",
+    "volume_weighted_momentum"
+  ],
+  "available_features": [
+    "price_acceleration_factor",
+    "rsi_trend_alignment",
+    "trend_consistency_score",
+    "volume_weighted_momentum"
+  ],
+  "feature_info": [
+    {
+      "name": "price_acceleration_factor",
+      "category": "shape",
+      "description": "사이클 후반부와 전반부의 평균 가격 변화율 비교",
+      "unit": "ratio"
+    },
+    {
+      "name": "volume_weighted_momentum",
+      "category": "strength",
+      "description": "거래량 가중 모멘텀 지표",
+      "unit": "weighted_ratio"
+    }
+  ],
+  "categories": {
+    "shape": [
+      "price_acceleration_factor"
+    ],
+    "strength": [
+      "rsi_trend_alignment",
+      "trend_consistency_score",
+      "volume_weighted_momentum"
+    ]
+  },
+  "export_timestamp": "2025-08-31T17:46:07.811923"
+}

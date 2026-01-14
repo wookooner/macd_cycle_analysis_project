@@ -1,0 +1,16 @@
+#####분석 시각화 목록
+
+
+-그래프1 : start_macd , end_macd , macd변화량
+3개의 변수를 산점도 그래프로
+
+-그래프2 : start_hist , end_hist , hist변화량
+3개의 변수를 산점도 그래프로
+
+-그래프3 : start_rsi , end_rsi , rsi 변화량
+3개의 변수를 산점도 그래프로
+
+-그래프4 : peak_price_position , trough_price_position 
+2개의 변수를 산점도 그래프로
+
+-그래프5 : hist_positive_ratio , price_up_ratio , price_down_ratio

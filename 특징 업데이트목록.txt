@@ -1,0 +1,33 @@
+#상위 타임프레임 어디에 위치하는지
+
+ex, 4h 사이클 데이터 기준
+
+"parent_cycle_context": {
+  "parent_1d": {
+    	"cycle_id": "cycle_1d_xxxxxxxxxx",
+    	"cycle_type": "down",
+    
+    // --- 위치 정보 (정교화) ---
+    	"sub_cycle_order": 3,						# 사이클 순서
+    	"total_sub_cycles_in_parent": 8,				# 상위 사이클에 포함된 사이클 전체 개수
+    	"relative_position_by_order": 0.375,			# 순서 / 전체개수
+	"include" :	"1"							#사이클이 상위 사이클에 포함된 비율.
+
+    // --- 부모 사이클의 정보 ---
+    	"price_change_pct": -15.2,
+	"start_macd" :
+	"start_macd_signal" :
+	"start_hist" :
+	"start_rsi" :
+	
+	
+    
+
+  },
+  "parent_1w": {
+    "cycle_id": "cycle_1w_yyyyyyyyyy",
+    "cycle_type": "up",
+    "parent_price_change_pct": 80.5
+    // ... 1w 사이클에 대한 정보 추가 ...
+  }
+}

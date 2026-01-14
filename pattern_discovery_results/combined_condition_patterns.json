@@ -1,0 +1,242 @@
+[
+  {
+    "condition": "duration_candles > 14.00 AND end_hist > 63.41",
+    "features": [
+      "duration_candles",
+      "end_hist"
+    ],
+    "sample_count": 108,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 7.889135279207275
+  },
+  {
+    "condition": "duration_candles < 6.00 AND change_price_pct < -1.96",
+    "features": [
+      "duration_candles",
+      "change_price_pct"
+    ],
+    "sample_count": 52,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -4.423230867090711
+  },
+  {
+    "condition": "start_rsi < 42.29 AND end_rsi > 51.21",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 149,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 6.3916995669280245
+  },
+  {
+    "condition": "start_rsi < 42.29 AND end_rsi > 61.17",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 55,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 8.711791802655753
+  },
+  {
+    "condition": "start_rsi > 50.88 AND end_rsi < 41.00",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 139,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -7.309746699889134
+  },
+  {
+    "condition": "start_rsi < 50.88 AND end_rsi > 61.17",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 135,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 7.6294849085000385
+  },
+  {
+    "condition": "start_rsi > 60.02 AND end_rsi < 41.00",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 59,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -8.817878270688718
+  },
+  {
+    "condition": "start_rsi > 60.02 AND end_rsi < 51.21",
+    "features": [
+      "start_rsi",
+      "end_rsi"
+    ],
+    "sample_count": 142,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -5.829198326374136
+  },
+  {
+    "condition": "start_rsi > 50.88 AND end_macd < -132.30",
+    "features": [
+      "start_rsi",
+      "end_macd"
+    ],
+    "sample_count": 82,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -8.787365284711804
+  },
+  {
+    "condition": "start_rsi > 60.02 AND end_macd < -132.30",
+    "features": [
+      "start_rsi",
+      "end_macd"
+    ],
+    "sample_count": 34,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -10.940646073919886
+  },
+  {
+    "condition": "start_rsi > 50.88 AND change_price_pct < -1.96",
+    "features": [
+      "start_rsi",
+      "change_price_pct"
+    ],
+    "sample_count": 253,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -5.870957038065923
+  },
+  {
+    "condition": "start_rsi > 60.02 AND change_price_pct < -1.96",
+    "features": [
+      "start_rsi",
+      "change_price_pct"
+    ],
+    "sample_count": 137,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -6.200319459265675
+  },
+  {
+    "condition": "end_rsi < 41.00 AND start_macd > 11.71",
+    "features": [
+      "end_rsi",
+      "start_macd"
+    ],
+    "sample_count": 152,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -7.193453948239103
+  },
+  {
+    "condition": "end_rsi < 41.00 AND start_macd > 204.55",
+    "features": [
+      "end_rsi",
+      "start_macd"
+    ],
+    "sample_count": 66,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -7.974891295330546
+  },
+  {
+    "condition": "end_rsi > 61.17 AND start_macd < -135.67",
+    "features": [
+      "end_rsi",
+      "start_macd"
+    ],
+    "sample_count": 64,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 8.436035271267333
+  },
+  {
+    "condition": "end_rsi > 61.17 AND start_macd < 11.71",
+    "features": [
+      "end_rsi",
+      "start_macd"
+    ],
+    "sample_count": 144,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 6.933037647306094
+  },
+  {
+    "condition": "end_rsi > 51.21 AND end_macd < -132.30",
+    "features": [
+      "end_rsi",
+      "end_macd"
+    ],
+    "sample_count": 18,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 4.337101549777859
+  },
+  {
+    "condition": "end_rsi < 41.00 AND start_hist > 59.79",
+    "features": [
+      "end_rsi",
+      "start_hist"
+    ],
+    "sample_count": 129,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -6.644935614931112
+  },
+  {
+    "condition": "end_rsi > 61.17 AND start_hist < -60.45",
+    "features": [
+      "end_rsi",
+      "start_hist"
+    ],
+    "sample_count": 115,
+    "up_ratio": 100.0,
+    "down_ratio": 0.0,
+    "bias_score": 50.0,
+    "avg_price_change": 7.5900990513807045
+  },
+  {
+    "condition": "end_rsi > 51.21 AND change_price_pct < -1.96",
+    "features": [
+      "end_rsi",
+      "change_price_pct"
+    ],
+    "sample_count": 17,
+    "up_ratio": 0.0,
+    "down_ratio": 100.0,
+    "bias_score": 50.0,
+    "avg_price_change": -2.777911714706574
+  }
+]

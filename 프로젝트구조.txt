@@ -1,0 +1,206 @@
+프로젝트 구조(상시 업데이트) :
+
+
+🔍 프로젝트 루트: C:\Users\Administrator\Desktop\macd_cycle_analysis_project
+
+📁 프로젝트 구조:
+├── 📁 cycle_algorithm/
+│   ├── 📁 algorithm_list/
+│   │   ├── 📁 base_1/
+│   │   └── 📁 macd_histogram_change/
+│   │       ├── 📁 __pycache__/
+│   │       │   └── 📄 macd_histogram_change.cpython-313.pyc
+│   │       ├── 📄 macd_histogram_change.py
+│   │       ├── 📄 macd_histogram_change2.py
+│   │       └── 📄 기본 macd 히스토그램 기반 사이클.txt
+│   └── 📁 cycle_test/
+├── 📁 cycle_detect/
+│   ├── 📁 __pycache__/
+│   │   └── 📄 macd_histogram_change_detect.cpython-313.pyc
+│   └── 📄 macd_histogram_change_detect.py
+├── 📁 data/
+│   ├── 📁 backup_data/
+│   │   ├── 📄 BTCUSD_1M.csv.backup_20250819_194548
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250818_172039
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250818_172351
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250818_172513
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250819_191701
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250819_194548
+│   │   ├── 📄 BTCUSD_1d.csv.backup_20250820_162942
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250818_172038
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250818_172350
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250818_172437
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250819_191659
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250819_194546
+│   │   ├── 📄 BTCUSD_1h.csv.backup_20250820_162941
+│   │   ├── 📄 BTCUSD_1m.csv.backup_20250820_162943
+│   │   ├── 📄 BTCUSD_1w.csv.backup_20250818_172039
+│   │   ├── 📄 BTCUSD_1w.csv.backup_20250818_172352
+│   │   ├── 📄 BTCUSD_1w.csv.backup_20250819_194548
+│   │   ├── 📄 BTCUSD_1w.csv.backup_20250820_162942
+│   │   ├── 📄 BTCUSD_4h.csv.backup_20250818_172038
+│   │   ├── 📄 BTCUSD_4h.csv.backup_20250818_172351
+│   │   ├── 📄 BTCUSD_4h.csv.backup_20250819_191700
+│   │   ├── 📄 BTCUSD_4h.csv.backup_20250819_194547
+│   │   └── 📄 BTCUSD_4h.csv.backup_20250820_162942
+│   ├── 📁 base_data/
+│   │   ├── 📄 BTCUSD_1d.csv
+│   │   ├── 📄 BTCUSD_1h.csv
+│   │   ├── 📄 BTCUSD_1m.csv
+│   │   ├── 📄 BTCUSD_1w.csv
+│   │   └── 📄 BTCUSD_4h.csv
+│   ├── 📁 cycle_data/
+│   │   ├── 📁 macd_histogram_change_algo/
+│   │   │   ├── 📁 cycle/
+│   │   │   │   ├── 📄 cycle_data_20250819_203745.csv
+│   │   │   │   ├── 📄 cycle_data_20250819_204130.csv
+│   │   │   │   ├── 📄 cycle_data_20250819_204435.parquet
+│   │   │   │   ├── 📄 cycle_data_20250819_205221.parquet
+│   │   │   │   ├── 📄 cycle_data_20250819_205743.parquet
+│   │   │   │   ├── 📄 cycle_data_20250819_205939.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1d.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1h.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1m.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1w.parquet
+│   │   │   │   └── 📄 macd_histogram_change_4h.parquet
+│   │   │   ├── 📁 noise/
+│   │   │   │   ├── 📄 macd_histogram_change_1d.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1h.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1m.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_1w.parquet
+│   │   │   │   ├── 📄 macd_histogram_change_4h.parquet
+│   │   │   │   ├── 📄 noise_data_20250819_203745.csv
+│   │   │   │   ├── 📄 noise_data_20250819_204130.csv
+│   │   │   │   ├── 📄 noise_data_20250819_204435.parquet
+│   │   │   │   ├── 📄 noise_data_20250819_205221.parquet
+│   │   │   │   ├── 📄 noise_data_20250819_205743.parquet
+│   │   │   │   └── 📄 noise_data_20250819_205939.parquet
+│   │   │   ├── 📄 metadata_20250819_204130.json
+│   │   │   ├── 📄 metadata_20250819_204435.json
+│   │   │   ├── 📄 metadata_20250819_205221.json
+│   │   │   ├── 📄 metadata_20250819_205743.json
+│   │   │   └── 📄 metadata_20250819_205939.json
+│   │   └── 📁 structured/
+│   │       ├── 📄 cycles_1d.parquet
+│   │       ├── 📄 cycles_1h.parquet
+│   │       ├── 📄 cycles_1m.parquet
+│   │       ├── 📄 cycles_1w.parquet
+│   │       └── 📄 cycles_4h.parquet
+│   └── 📁 noise_data/
+├── 📁 data_collect/
+│   ├── 📁 __pycache__/
+│   │   └── 📄 config.cpython-313.pyc
+│   ├── 📄 collector.py
+│   └── 📄 config.py
+├── 📁 data_control/
+│   ├── 📄 indicator.py
+│   └── 📄 validator.py
+├── 📁 feature_extract/
+│   └── 📁 macd_historgram_change_feature/
+│       ├── 📁 __pycache__/
+│       │   ├── 📄 config.cpython-313.pyc
+│       │   └── 📄 feature_extract.cpython-313.pyc
+│       ├── 📄 config.py
+│       ├── 📄 feature_extract.py
+│       └── 📄 히스토그램 기반 사이클 특징 리스트.txt
+├── 📄 project_helper.py
+└── 📄 프로젝트구조.txt 
+
+
+
+
+
+사이클 데이터 parquet 파일 구조.
+ 파일 형식 분석: Parquet
+==================================================
+📜 스키마 정보:
+<pyarrow._parquet.ParquetSchema object at 0x000002336517F880>
+required group field_id=-1 schema {
+  optional binary field_id=-1 cycle_id (String);
+  optional binary field_id=-1 timeframe (String);
+  optional binary field_id=-1 start_date (String);
+  optional binary field_id=-1 end_date (String);
+  optional binary field_id=-1 cycle_type (String);
+  optional int64 field_id=-1 duration_candles;
+  optional binary field_id=-1 category (String);
+  optional binary field_id=-1 algorithm_used (String);
+  optional group field_id=-1 candle_data (List) {
+    repeated group field_id=-1 list {
+      optional group field_id=-1 element {
+        optional double field_id=-1 close;
+        optional double field_id=-1 high;
+        optional double field_id=-1 low;
+        optional double field_id=-1 macd;
+        optional double field_id=-1 macd_hist;
+        optional double field_id=-1 macd_signal;
+        optional double field_id=-1 open;
+        optional double field_id=-1 rsi;
+        optional binary field_id=-1 timestamp (String);
+        optional double field_id=-1 volume;
+      }
+    }
+  }
+  optional group field_id=-1 cycle_features {
+    optional double field_id=-1 all_volume;
+    optional int64 field_id=-1 core_count;
+    optional int64 field_id=-1 direction_change;
+    optional double field_id=-1 direction_pct;
+    optional double field_id=-1 end_hist;
+    optional double field_id=-1 end_macd;
+    optional double field_id=-1 end_macd_signal;
+    optional double field_id=-1 end_price;
+    optional double field_id=-1 end_rsi;
+    optional double field_id=-1 end_volume;
+    optional double field_id=-1 macd_change;
+    optional double field_id=-1 macd_histogram_change;
+    optional double field_id=-1 macd_signal_change;
+    optional double field_id=-1 max_high_change;
+    optional double field_id=-1 max_high_pct;
+    optional double field_id=-1 max_loss_change;
+    optional double field_id=-1 max_loss_pct;
+    optional int64 field_id=-1 noise_count;
+    optional double field_id=-1 price_change_pct;
+    optional double field_id=-1 rsi_change;
+    optional double field_id=-1 start_hist;
+    optional double field_id=-1 start_macd;
+    optional double field_id=-1 start_macd_signal;
+    optional double field_id=-1 start_price;
+    optional double field_id=-1 start_rsi;
+    optional double field_id=-1 start_volume;
+  }
+}
+
+
+📊 저장된 데이터 정보:
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 7773 entries, 0 to 7772
+Data columns (total 10 columns):
+ #   Column            Non-Null Count  Dtype
+---  ------            --------------  -----
+ 0   cycle_id          7773 non-null   object
+ 1   timeframe         7773 non-null   object
+ 2   start_date        7773 non-null   object
+ 3   end_date          7773 non-null   object
+ 4   cycle_type        7773 non-null   object
+ 5   duration_candles  7773 non-null   int64
+ 6   category          7773 non-null   object
+ 7   algorithm_used    7773 non-null   object
+ 8   candle_data       7773 non-null   object
+ 9   cycle_features    7773 non-null   object
+dtypes: int64(1), object(9)
+memory usage: 607.4+ KB
+
+첫 5개 행 데이터:
+            cycle_id timeframe  ...                                        candle_data                                     cycle_features
+0   cycle_1h_idx2001        1h  ...  [{'close': 13330.18, 'high': 13418.43, 'low': ...  {'all_volume': 0.0, 'core_count': 4, 'directio...
+1   cycle_1h_idx7002        1h  ...  [{'close': 13570.35, 'high': 13818.55, 'low': ...  {'all_volume': 0.0, 'core_count': 6, 'directio...
+2  cycle_1h_idx14003        1h  ...  [{'close': 13211.39, 'high': 13245.0, 'low': 1...  {'all_volume': 0.0, 'core_count': 8, 'directio...
+3  cycle_1h_idx23004        1h  ...  [{'close': 13380.0, 'high': 13500.0, 'low': 13...  {'all_volume': 0.0, 'core_count': 7, 'directio...
+4  cycle_1h_idx31005        1h  ...  [{'close': 13343.0, 'high': 13359.98, 'low': 1...  {'all_volume': 0.0, 'core_count': 6, 'directio...
+
+[5 rows x 10 columns]
+
+📝 Parquet 메타데이터:
+  - 생성 라이브러리: parquet-cpp-arrow version 21.0.0
+  - 행 그룹 수: 1
+  - 총 행 수: 7773
