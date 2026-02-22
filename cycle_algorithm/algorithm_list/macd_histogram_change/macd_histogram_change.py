@@ -44,6 +44,9 @@ class SimpleMACDAlgorithm:
         
         macd_hist = data[macd_column].dropna()
         original_index = macd_hist.index
+        # If there's no valid MACD histogram data, return empty results
+        if macd_hist.empty:
+            return [], pd.Series([], index=original_index, dtype=int)
         
         #print(f"📊 단순 알고리즘 시작: {len(macd_hist)} 포인트")
         
@@ -89,7 +92,7 @@ class SimpleMACDAlgorithm:
             if directions[i] in [1, -1]:
                 cycle_start = i
                 main_direction = directions[i]
-                cycle_type = 'up' if main_direction == 1 else 'down'
+                cycle_type = 'rising' if main_direction == 1 else 'falling'
                 
                 #print(f"   사이클 시작: 인덱스 {i}, 방향 {main_direction}")
                 
@@ -155,9 +158,10 @@ class SimpleMACDAlgorithm:
                 'down_cycles': 0,
                 'avg_cycle_length': 0
             }
-        
-        up_cycles = [c for c in cycles if c.cycle_type == 'up']
-        down_cycles = [c for c in cycles if c.cycle_type == 'down']
+
+        # Accept both legacy labels ('up'/'down') and new labels ('rising'/'falling')
+        up_cycles = [c for c in cycles if getattr(c, 'cycle_type', None) in ('up', 'rising')]
+        down_cycles = [c for c in cycles if getattr(c, 'cycle_type', None) in ('down', 'falling')]
         
         return {
             'total_cycles': len(cycles),

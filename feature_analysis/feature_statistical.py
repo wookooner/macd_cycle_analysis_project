@@ -591,7 +591,7 @@ def multivariate_analysis(df, cycle_type):
 def main():
     """메인 실행 함수"""
     # 분석할 파일 경로 설정
-    file_path = 'data/cycle_data/structured/cycles_1d.parquet'
+    file_path = 'data/cycle_data/structured/cycles_1h.parquet'
     
     # 데이터 로드
     df, timeframe = load_and_prepare_data(file_path)

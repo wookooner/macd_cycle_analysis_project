@@ -279,9 +279,13 @@ def detect_cycles_for_timeframe_v3(file_path, timeframe, algorithm, config):
     cycle_points = sum([cycle['duration_candles'] for cycle in cycle_records])
     total_points = len(data)
     noise_points = total_points - cycle_points
-    
-    print(f"📈 사이클: {cycle_points} 포인트 ({cycle_points/total_points*100:.1f}%)")
-    print(f"🔇 노이즈: {noise_points} 포인트 ({noise_points/total_points*100:.1f}%)")
+
+    if total_points > 0:
+        print(f"📈 사이클: {cycle_points} 포인트 ({cycle_points/total_points*100:.1f}%)")
+        print(f"🔇 노이즈: {noise_points} 포인트 ({noise_points/total_points*100:.1f}%)")
+    else:
+        print(f"📈 사이클: {cycle_points} 포인트 (0.0%)")
+        print(f"🔇 노이즈: {noise_points} 포인트 (0.0%)")
     
     return cycle_records, len(cycles)
 
