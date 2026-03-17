@@ -146,10 +146,23 @@ class CycleHierarchyMapper:
             df = self.cycles_by_timeframe.get(timeframe)
             if df is not None:
                 for _, cycle in df.iterrows():
+                    # Safely format datetimes (they may be pd.Timestamp, datetime, or strings)
+                    start_val = cycle.get('start_datetime')
+                    end_val = cycle.get('end_datetime')
+
+                    def _fmt(dt_val):
+                        if isinstance(dt_val, (pd.Timestamp, datetime)):
+                            return dt_val.strftime('%Y-%m-%d %H:%M:%S')
+                        try:
+                            parsed = pd.to_datetime(dt_val)
+                            return parsed.strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception:
+                            return str(dt_val)
+
                     self.hierarchy_map[timeframe][cycle['cycle_id']] = {
                         'cycle_type': cycle['cycle_type'],
-                        'start_date': cycle['start_datetime'].strftime('%Y-%m-%d %H:%M:%S'),
-                        'end_date': cycle['end_datetime'].strftime('%Y-%m-%d %H:%M:%S'),
+                        'start_date': _fmt(start_val),
+                        'end_date': _fmt(end_val),
                         'duration_candles': int(cycle['duration_candles']),
                         'parent_cycle_ids': {},
                         'child_cycle_ids': {}

@@ -579,13 +579,16 @@ class ImprovedFeatureVisualizer:
 
 
 class ImprovedHierarchicalCycleAnalyzer:
-    def __init__(self, base_path="C:/Users/Administrator/Desktop/macd_cycle_analysis_project"):
+    def __init__(self, base_path=None):
         """
         개선된 계층적 사이클 분석기 초기화
         
         Args:
-            base_path (str): 프로젝트 루트 경로
+            base_path (str): 프로젝트 루트 경로 (기본값: 현재 스크립트 위치에서 찾기)
         """
+        if base_path is None:
+            # 현재 스크립트의 부모 디렉토리의 부모 (프로젝트 루트)
+            base_path = Path(__file__).parent.parent
         self.base_path = Path(base_path)
         self.data_path = self.base_path / "data" / "cycle_data" / "structured"
         self.hierarchy_map_path = self.data_path / "cycle_hierarchy_map.json"

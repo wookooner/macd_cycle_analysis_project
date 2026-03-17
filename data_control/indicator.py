@@ -26,7 +26,7 @@ class IndicatorCalculator:
         """기존 지표 계산 상태 확인"""
         self.logger.info("=== 기존 지표 상태 확인 ===")
         
-        indicator_columns = ['macd', 'macd_signal', 'macd_hist', 'rsi']
+        indicator_columns = ['macd', 'macd_signal', 'macd_hist', 'rsi', 'cvd', 'cvd_rolling']
         status = {}
         
         for col in indicator_columns:
@@ -106,11 +106,89 @@ class IndicatorCalculator:
         self.logger.info(f"RSI 계산 완료: {df['rsi'].notna().sum()}개 값 생성")
         return df
     
-    def update_indicators(self, df, force_recalculate=False, recalc_last_n=50):
-        """지표 업데이트 (기존 계산 상태 고려)"""
+    def calculate_cvd(self, df, rolling_period=20):
+        """
+        CVD(Cumulative Volume Delta) 계산.
+
+        CVD란 무엇인가:
+          각 캔들의 volume_delta(= 2*taker_buy_base - volume)를 누적 합산한 값.
+          volume_delta가 양수면 그 캔들에서 공격적 매수(Taker Buy)가 우세했다는 의미이고,
+          음수면 공격적 매도(Taker Sell)가 우세했다는 의미다.
+          CVD가 지속적으로 상승하면 매수 압력이 누적되고 있는 상태이고,
+          CVD가 하락하면 매도 압력이 누적되고 있는 상태다.
+
+        두 가지 CVD를 계산하는 이유:
+          - cvd (누적 CVD): 선물 상장일(2019-09-13) 이후부터의 전체 누적합.
+            "지금까지 쌓인 순매수 압력의 총량"을 의미하며, 장기 추세 파악에 유용.
+            단, 절대값이 매우 커지므로 기간 간 직접 비교는 어렵다.
+
+          - cvd_rolling (롤링 CVD): 최근 N캔들의 volume_delta 합계.
+            오실레이터처럼 동작해서 현재 시장의 단기 매수/매도 압력 균형을 보여준다.
+            MACD와 함께 사이클 시작 시점의 자금 흐름 강도를 측정하는 데 적합하다.
+
+        선물 상장일(2019-09-13) 이전 데이터는 taker_buy_base가 없으므로 NaN으로 유지.
+
+        Parameters
+        ----------
+        rolling_period : int
+            롤링 CVD 계산 윈도우 (기본값 20 — 타임프레임별로 다르게 쓸 수도 있음)
+        """
+        self.logger.info(f"CVD 계산 중... (rolling_period: {rolling_period})")
+
+        if 'volume_delta' not in df.columns:
+            self.logger.warning("volume_delta 컬럼이 없습니다. backfill_futures_columns.py 먼저 실행 필요.")
+            df['cvd']         = pd.NA
+            df['cvd_rolling'] = pd.NA
+            return df
+
+        # volume_delta가 NaN인 행(선물 상장 이전)은 CVD 계산에서 제외
+        # → NaN 구간은 그대로 NaN으로 두고, 유효 구간만 누적합 계산
+        vd = df['volume_delta'].copy()
+        valid_mask = vd.notna()
+
+        # ── 누적 CVD ──────────────────────────────────────────
+        # 선물 데이터가 시작되는 첫 유효 행부터 누적합 계산
+        # NaN 구간(이전)은 건드리지 않음
+        cvd_series = pd.Series(np.nan, index=df.index, dtype='float64')
+        if valid_mask.any():
+            cvd_series[valid_mask] = vd[valid_mask].cumsum()
+
+        # ── 롤링 CVD ──────────────────────────────────────────
+        # min_periods=1: 롤링 윈도우가 채워지기 전에도 값을 계산
+        # (초기 구간에서도 값이 끊기지 않도록)
+        cvd_rolling_series = pd.Series(np.nan, index=df.index, dtype='float64')
+        if valid_mask.any():
+            cvd_rolling_series[valid_mask] = (
+                vd[valid_mask]
+                .rolling(window=rolling_period, min_periods=1)
+                .sum()
+            )
+
+        df['cvd']         = cvd_series.round(4)
+        df['cvd_rolling'] = cvd_rolling_series.round(4)
+
+        valid_cvd = df['cvd'].notna().sum()
+        self.logger.info(f"CVD 계산 완료: {valid_cvd}개 값 생성 (NaN {len(df) - valid_cvd}개는 선물 상장 이전)")
+        return df
+
+    def update_indicators(self, df, force_recalculate=False, recalc_last_n=50,
+                          cvd_rolling_period=20):
+        """
+        지표 업데이트 (기존 계산 상태 고려).
+        MACD, RSI와 함께 CVD도 계산한다.
+
+        CVD는 MACD/RSI와 계산 조건이 다르기 때문에 별도로 판단한다.
+          - MACD/RSI: close 가격만 있으면 항상 계산 가능
+          - CVD: volume_delta(= taker_buy_base 기반)가 있어야 계산 가능
+                 선물 상장일(2019-09-13) 이전 구간은 NaN이 정상이다.
+
+        cvd_rolling_period는 타임프레임에 따라 조정할 수 있다.
+        예를 들어 1d 데이터라면 20일 롤링, 4h 데이터라면 20*6=120 캔들이
+        같은 "20거래일" 개념이 되므로 필요에 따라 변경해서 사용한다.
+        """
         self.logger.info("=== 지표 업데이트 시작 ===")
         status = self.check_existing_indicators(df, recalc_last_n)
-        
+
         full_recalc_needed = (
             force_recalculate or
             not status['macd']['exists'] or
@@ -118,38 +196,64 @@ class IndicatorCalculator:
             status['macd']['coverage_ratio'] < 0.5 or
             status['rsi']['coverage_ratio'] < 0.5
         )
-        
+
+        # CVD는 volume_delta 존재 여부와 기존 cvd 컬럼 상태로 별도 판단
+        cvd_recalc_needed = (
+            force_recalculate or
+            not status['cvd']['exists'] or
+            status['cvd']['coverage_ratio'] < 0.01   # 거의 없으면 재계산
+        )
+
         if full_recalc_needed:
             self.logger.info("전체 지표를 새로 계산합니다.")
             df = self.calculate_macd(df)
             df = self.calculate_rsi(df)
         else:
             self.logger.info(f"마지막 {recalc_last_n}개 데이터의 지표를 재계산합니다.")
-            df = self.recalculate_last_indicators(df, recalc_last_n)
-        
+            df = self.recalculate_last_indicators(df, recalc_last_n, cvd_rolling_period)
+
+        # CVD는 누적합 특성상 항상 전체 재계산이 필요하다.
+        # 중간 값 하나만 바꿔도 이후 모든 누적값이 달라지기 때문이다.
+        if cvd_recalc_needed:
+            df = self.calculate_cvd(df, rolling_period=cvd_rolling_period)
+        else:
+            self.logger.info("CVD: 기존 값 유지 (재계산 불필요)")
+
         return df
-    
-    def recalculate_last_indicators(self, df, last_n=50):
-        """마지막 N개 데이터의 지표만 재계산"""
+
+    def recalculate_last_indicators(self, df, last_n=50, cvd_rolling_period=20):
+        """
+        마지막 N개 데이터의 지표만 재계산.
+        MACD/RSI는 부분 재계산이 가능하지만,
+        CVD는 누적합이라 항상 전체를 다시 계산해야 한다.
+        """
         total_rows = len(df)
         if total_rows <= last_n:
-            return self.calculate_macd(self.calculate_rsi(df))
+            df = self.calculate_macd(df)
+            df = self.calculate_rsi(df)
+            return df
 
         macd_recalc_start = max(0, total_rows - max(last_n, 60))
-        rsi_recalc_start = max(0, total_rows - max(last_n, 30))
-        
+        rsi_recalc_start  = max(0, total_rows - max(last_n, 30))
+
         self.logger.info(f"MACD 재계산 구간: {macd_recalc_start}~{total_rows}")
         self.logger.info(f"RSI 재계산 구간: {rsi_recalc_start}~{total_rows}")
-        
+
         df_temp = self.calculate_macd(self.calculate_rsi(df.copy()))
-        
-        df.loc[macd_recalc_start:, ['macd', 'macd_signal', 'macd_hist']] = df_temp.loc[macd_recalc_start:, ['macd', 'macd_signal', 'macd_hist']]
+
+        df.loc[macd_recalc_start:, ['macd', 'macd_signal', 'macd_hist']] = \
+            df_temp.loc[macd_recalc_start:, ['macd', 'macd_signal', 'macd_hist']]
         df.loc[rsi_recalc_start:, 'rsi'] = df_temp.loc[rsi_recalc_start:, 'rsi']
-        
+
+        # CVD rolling은 마지막 N행만 업데이트해도 되지만,
+        # 누적 CVD는 전체를 재계산하지 않으면 정합성이 깨지므로 전체 재계산
+        df = self.calculate_cvd(df, rolling_period=cvd_rolling_period)
+
         self.logger.info("마지막 구간 지표 재계산 완료")
         return df
     
-    def process_file(self, file_path, output_path=None, force_recalculate=False, recalc_last_n=50):
+    def process_file(self, file_path, output_path=None, force_recalculate=False,
+                     recalc_last_n=50, cvd_rolling_period=20):
         """파일 단위로 지표 계산 처리"""
         self.logger.info(f"파일 처리 시작: {file_path}")
         
@@ -161,8 +265,9 @@ class IndicatorCalculator:
                 df = df.sort_values('unix').reset_index(drop=True)
                 self.logger.info("데이터를 unix timestamp 기준으로 정렬했습니다.")
             
-            df = self.update_indicators(df, force_recalculate, recalc_last_n)
-            
+            df = self.update_indicators(df, force_recalculate, recalc_last_n,
+                                         cvd_rolling_period=cvd_rolling_period)
+
             if output_path is None:
                 output_path = file_path
 
@@ -189,7 +294,8 @@ class IndicatorCalculator:
             self.logger.error(f"파일 처리 실패: {str(e)}")
             return False
 
-def process_multiple_files(file_paths, force_recalculate=False, recalc_last_n=50):
+def process_multiple_files(file_paths, force_recalculate=False, recalc_last_n=50,
+                           cvd_rolling_period=20):
     """여러 파일을 한 번에 처리"""
     calculator = IndicatorCalculator()
     results = {}
@@ -198,9 +304,10 @@ def process_multiple_files(file_paths, force_recalculate=False, recalc_last_n=50
     
     for file_path in file_paths:
         result = calculator.process_file(
-            file_path, 
+            file_path,
             force_recalculate=force_recalculate,
-            recalc_last_n=recalc_last_n
+            recalc_last_n=recalc_last_n,
+            cvd_rolling_period=cvd_rolling_period
         )
         results[file_path] = result
         

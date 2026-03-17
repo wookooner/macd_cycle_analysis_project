@@ -30,44 +30,60 @@
           "enabled": true,
           "default_value": 0,
           "data_type": "int"
+        },
+        "peak_price_position": {
+          "description": "사이클 내 최고가(high) 캔들의 위치 비율 (0~1). 진입 시점 이후 실시간 사용 가능",
+          "calculator": "calc_peak_price_position",
+          "enabled": true,
+          "default_value": 0.5,
+          "data_type": "float"
+        },
+        "trough_price_position": {
+          "description": "사이클 내 최저가(low) 캔들의 위치 비율 (0~1). 진입 시점 이후 실시간 사용 가능",
+          "calculator": "calc_trough_price_position",
+          "enabled": true,
+          "default_value": 0.5,
+          "data_type": "float"
         }
       }
     },
+
     "strength": {
       "description": "강도/견고함 - 사이클의 추세가 얼마나 일관되고 견고했는지",
       "features": {
         "direction_pct": {
-          "description": "핵심 캔들의 비율 (core_count / duration_candles)",
+          "description": "핵심 캔들의 비율 (core_count / duration_candles * 100)",
           "calculator": "calc_direction_pct",
           "enabled": true,
           "default_value": 0.0,
           "data_type": "float"
         },
         "hist_positive_ratio": {
-          "description": "MACD 히스토그램이 양수였던 캔들의 비율",
+          "description": "[비활성] MACD 히스토그램이 양수였던 캔들의 비율. 통계 유의성 낮음 (p=0.83)",
           "calculator": "calc_hist_positive_ratio",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "price_up_ratio": {
-          "description": "가격이 상승한 (양봉) 캔들의 비율",
+          "description": "[비활성] 양봉 캔들의 비율. 통계 유의성 낮음",
           "calculator": "calc_price_up_ratio",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "price_down_ratio": {
-          "description": "가격이 하락한 (음봉) 캔들의 비율",
+          "description": "[비활성] 음봉 캔들의 비율. 통계 유의성 낮음",
           "calculator": "calc_price_down_ratio",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         }
       }
     },
+
     "start": {
-      "description": "시작점 지표 - 사이클 시작 시점의 시장 상태",
+      "description": "시작점 지표 - 사이클 시작 시점의 시장 상태. 진입 결정에 직접 사용 가능",
       "features": {
         "price": {
           "description": "사이클 첫 캔들의 종가",
@@ -98,148 +114,165 @@
           "data_type": "float"
         },
         "macd_signal": {
-          "description": "사이클 첫 캔들의 MACD Signal 값",
+          "description": "[비활성] 사이클 첫 캔들의 MACD Signal 값. 통계 유의성 낮음 (p=0.44)",
           "calculator": "calc_start_macd_signal",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "hist": {
-          "description": "사이클 첫 캔들의 MACD Histogram 값",
+          "description": "사이클 첫 캔들의 MACD Histogram 값. 진입 조건 핵심 지표",
           "calculator": "calc_start_hist",
           "enabled": true,
           "default_value": 0.0,
           "data_type": "float"
+        },
+        "cvd_rolling": {
+          "description": "[신규] 사이클 첫 캔들의 롤링 CVD 값. 단기 매수/매도 압력 균형 측정. candle_data에 cvd_rolling 컬럼 필요",
+          "calculator": "calc_start_cvd_rolling",
+          "enabled": true,
+          "default_value": null,
+          "data_type": "float"
+        },
+        "funding_rate": {
+          "description": "[신규] 사이클 시작 시점에 가장 가까운 펀딩비. 롱/숏 포지션 쏠림 측정. 외부 funding_rate CSV 필요",
+          "calculator": "calc_start_funding_rate",
+          "enabled": true,
+          "default_value": null,
+          "data_type": "float"
         }
       }
     },
+
     "end": {
-      "description": "종료점 지표 - 사이클 종료 시점의 시장 상태",
+      "description": "[사후분석용] 종료점 지표. 사이클이 끝나야 확정되므로 진입 결정에 사용 불가",
       "features": {
         "price": {
-          "description": "사이클 마지막 캔들의 종가",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 종가",
           "calculator": "calc_end_price",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "volume": {
-          "description": "사이클 마지막 캔들의 거래량",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 거래량",
           "calculator": "calc_end_volume",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "rsi": {
-          "description": "사이클 마지막 캔들의 RSI 값",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 RSI 값",
           "calculator": "calc_end_rsi",
-          "enabled": true,
+          "enabled": false,
           "default_value": 50.0,
           "data_type": "float"
         },
         "macd": {
-          "description": "사이클 마지막 캔들의 MACD 값",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 MACD 값",
           "calculator": "calc_end_macd",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "macd_signal": {
-          "description": "사이클 마지막 캔들의 MACD Signal 값",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 MACD Signal 값",
           "calculator": "calc_end_macd_signal",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "hist": {
-          "description": "사이클 마지막 캔들의 MACD Histogram 값",
+          "description": "[비활성/사후] 사이클 마지막 캔들의 MACD Histogram 값",
           "calculator": "calc_end_hist",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         }
       }
     },
+
     "change": {
-      "description": "시작-종료 변화량 - 사이클 시작과 끝을 비교한 순수 변화량",
+      "description": "시작-종료 변화량. price_pct는 분석 타깃 변수. 나머지는 사후 지표",
       "features": {
         "price_pct": {
-          "description": "시작가 대비 종료가의 등락률",
+          "description": "시작가 대비 종료가의 등락률. 분석의 타깃 변수 (Y). 사이클 완료 후 확정",
           "calculator": "calc_price_change_pct",
           "enabled": true,
           "default_value": 0.0,
           "data_type": "float"
         },
         "rsi": {
-          "description": "RSI 값의 변화량",
+          "description": "[비활성/사후] RSI 값의 변화량",
           "calculator": "calc_rsi_change",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "macd": {
-          "description": "MACD 값의 변화량",
+          "description": "[비활성/사후] MACD 값의 변화량",
           "calculator": "calc_macd_change",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "macd_signal": {
-          "description": "MACD Signal 값의 변화량",
+          "description": "[비활성/사후] MACD Signal 값의 변화량",
           "calculator": "calc_macd_signal_change",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "hist": {
-          "description": "MACD Histogram 값의 변화량",
+          "description": "[비활성/사후] MACD Histogram 값의 변화량",
           "calculator": "calc_macd_histogram_change",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         }
       }
     },
+
     "volatility": {
-      "description": "내부 변동성/극값 - 사이클 진행 중 발생한 가격 움직임의 크기 및 변동성",
+      "description": "내부 변동성/극값 - 사이클 진행 중 발생한 가격 움직임의 크기",
       "features": {
         "max_high_pct": {
-          "description": "시작가 대비 사이클 내 최고가의 상승률",
+          "description": "[비활성/사후] 시작가 대비 사이클 내 최고가 상승률",
           "calculator": "calc_max_high_pct",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "max_loss_pct": {
-          "description": "시작가 대비 사이클 내 최저가의 하락률",
+          "description": "[비활성/사후] 시작가 대비 사이클 내 최저가 하락률",
           "calculator": "calc_max_loss_pct",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "max_intraday_high_pct": {
-          "description": "캔들 내에서 발생한 최대 상승 변동률",
+          "description": "[비활성/사후] 사이클 내 최대 잠재 수익률. 사후 지표이며 O(n²) 연산",
           "calculator": "calc_max_intraday_high_pct",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "max_intraday_loss_pct": {
-          "description": "캔들 내에서 발생한 최대 하락 변동률",
+          "description": "[비활성/사후] 사이클 내 최대 잠재 손실률. 사후 지표이며 O(n²) 연산",
           "calculator": "calc_max_intraday_loss_pct",
-          "enabled": true,
+          "enabled": false,
           "default_value": 0.0,
           "data_type": "float"
         },
         "avg_true_range": {
-          "description": "사이클 내 캔들의 평균 ATR 값 (평균 변동폭)",
+          "description": "사이클 내 캔들의 평균 ATR (평균 변동폭). 통계 유의성 확인됨 (p=0.037)",
           "calculator": "calc_avg_true_range",
           "enabled": true,
           "default_value": 0.0,
           "data_type": "float"
         },
         "price_change_deviation": {
-          "description": "사이클 내 가격 변동률의 표준편차",
+          "description": "사이클 내 캔들별 종가 변동률의 표준편차. 변동성 일관성 측정",
           "calculator": "calc_price_change_deviation",
           "enabled": true,
           "default_value": 0.0,
@@ -247,6 +280,7 @@
         }
       }
     },
+
     "aggregate": {
       "description": "전체 집계 - 사이클 전체 기간의 데이터를 합산한 값",
       "features": {
@@ -256,15 +290,32 @@
           "enabled": true,
           "default_value": 0.0,
           "data_type": "float"
+        },
+        "cvd": {
+          "description": "[신규] 사이클 전체의 volume_delta 합산 (누적 매수/매도 압력). candle_data에 volume_delta 컬럼 필요",
+          "calculator": "calc_aggregate_cvd",
+          "enabled": true,
+          "default_value": null,
+          "data_type": "float"
         }
       }
     }
   },
+
   "calculation_config": {
     "batch_size": 1000,
     "handle_errors": true,
     "use_default_on_error": true
   },
-  "version": "2.0",
-  "structure_type": "categorized"
+
+  "version": "3.0",
+  "structure_type": "categorized",
+  "_notes": {
+    "enabled_false_reasons": {
+      "post_cycle": "사이클 종료 후에만 확정되는 값. 진입 결정에 사용 불가",
+      "low_significance": "이전 통계분석에서 p > 0.1 이상으로 유의성 없음",
+      "redundant": "다른 특징과 측정 차원이 겹침"
+    },
+    "new_features": "cvd_rolling, funding_rate, aggregate.cvd는 backfill + indicator.py 실행 후 재생성된 parquet에서만 값이 채워짐. 기존 parquet은 null"
+  }
 }
