@@ -4,25 +4,20 @@ from pathlib import Path
 def find_project_structure():
     """현재 프로젝트 구조를 자세히 시각적으로 표시합니다."""
     
-    current_path = Path.cwd()  # 현재 작업 디렉토리
-    print(f"현재 위치: {current_path}\n")
-    
-    # 상위 디렉토리까지 탐색하여 프로젝트 루트 찾기
-    project_root = current_path
-    for _ in range(5):  # 최대 5단계 상위까지
-        if any(folder.name in ['cycle_algorithm', 'cycle_detect', 'cycle_detection'] 
-               for folder in project_root.iterdir() if folder.is_dir()):
-            break
-        parent = project_root.parent
-        if parent == project_root: # 루트 디렉토리에 도달
-            break
-        project_root = parent
+    # 스크립트가 실행된 현재 작업 디렉토리를 프로젝트 루트로 고정
+    project_root = Path.cwd()  
+    print(f"현재 위치이자 🔍 프로젝트 루트: {project_root}\n")
 
-    print(f"🔍 프로젝트 루트: {project_root}\n")
+    # 출력에서 제외할 불필요한 폴더 목록 (필요에 따라 추가/삭제 가능)
+    ignore_dirs = {'.git', '__pycache__', 'venv', '.venv', 'env', '.idea', '.vscode', 'node_modules'}
 
     def display_structure(path, prefix=''):
         """재귀적으로 파일 및 폴더 구조를 출력합니다."""
-        items = sorted(list(path.iterdir()), key=lambda x: (x.is_file(), x.name))
+        
+        # 무시할 폴더를 제외하고 목록 생성
+        valid_items = [item for item in path.iterdir() if item.name not in ignore_dirs]
+        # 폴더를 먼저 보여주고, 그 다음 파일을 알파벳 순으로 정렬
+        items = sorted(valid_items, key=lambda x: (x.is_file(), x.name))
         
         for i, item in enumerate(items):
             # 마지막 아이템인지 확인
