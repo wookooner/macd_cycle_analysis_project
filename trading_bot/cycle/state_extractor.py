@@ -17,31 +17,29 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
+from cycle.market_state_schema import ANALYSIS_COLUMNS, DEFAULT_SCHEMA, DEFAULT_TIMEFRAME_ORDER
 
 logger = logging.getLogger("bot.state_extractor")
-DEFAULT_TIMEFRAME_ORDER = ["1w", "1d", "4h", "1h"]
-ANALYSIS_COLUMNS = [
-    "taker_buy_base",
-    "volume_delta",
-    "cvd",
-    "cvd_rolling",
-    "ppo",
-    "ppo_signal",
-    "ppo_hist",
-    "delta",
-    "ma_7",
-    "ma_25",
-    "ma_99",
-    "oi",
-    "oi_usd",
-    "funding_rate",
-]
+
+_TIMEFRAME_FLOOR_RULES = {
+    "1h": "h",
+    "4h": "4h",
+    "1d": "d",
+}
 
 
 class CycleStateExtractor:
-    def __init__(self, parquet_dir: Path, hierarchy_map_path: Path, timeframes: list[str] = None):
+    def __init__(
+        self,
+        parquet_dir: Path,
+        hierarchy_map_path: Path,
+        base_data_dir: Path,
+        timeframes: list[str] = None,
+    ):
         self.parquet_dir = parquet_dir
         self.hierarchy_map_path = hierarchy_map_path
+        self.base_data_dir = base_data_dir
+        self.schema = DEFAULT_SCHEMA
         self.timeframes = self._normalize_timeframes(timeframes or DEFAULT_TIMEFRAME_ORDER)
         self._cycle_frame_cache: dict[str, tuple[int, pd.DataFrame]] = {}
         self._hierarchy_cache: tuple[int, dict[str, Any]] | None = None
@@ -51,10 +49,13 @@ class CycleStateExtractor:
         self,
         current_position: Optional[dict] = None,
         recent_signals: Optional[list] = None,
+        as_of: Optional[datetime] = None,
     ) -> dict:
+        evaluation_time = self._to_utc_datetime(as_of)
         cycle_frames = self._load_cycle_frames()
         base_frames = self._load_base_frames()
         hierarchy = self._load_hierarchy_map()
+        cycle_frames = self._filter_closed_cycle_frames(cycle_frames, evaluation_time)
 
         tf_states = {}
         latest_price = None
@@ -69,6 +70,12 @@ class CycleStateExtractor:
                 state.pop("_latest_close")
 
         cycle_context = self._extract_cycle_context(cycle_frames, base_frames, hierarchy)
+        latest_1h_base_row = self._get_latest_closed_base_row("1h", base_frames, evaluation_time)
+        if latest_1h_base_row:
+            latest_price = latest_1h_base_row.get("close", latest_price)
+            reference_time = str(latest_1h_base_row.get("date", "")) or tf_states.get("1h", {}).get("end_date")
+        else:
+            reference_time = tf_states.get("1h", {}).get("end_date")
         if latest_price is None:
             latest_price = cycle_context.get("cycles", {}).get("1h", {}).get("latest_close")
 
@@ -76,6 +83,8 @@ class CycleStateExtractor:
 
         market_state = {
             "timestamp": self._utc_now_iso(),
+            "evaluation_time": self._to_iso(evaluation_time),
+            "reference_time": reference_time,
             "price": latest_price,
             "timeframes": tf_states,
             "chain": chain_info,
@@ -91,6 +100,30 @@ class CycleStateExtractor:
             chain_info.get("n_up"),
         )
         return market_state
+
+    def _filter_closed_cycle_frames(
+        self,
+        cycle_frames: dict[str, pd.DataFrame],
+        evaluation_time: datetime,
+    ) -> dict[str, pd.DataFrame]:
+        filtered_frames: dict[str, pd.DataFrame] = {}
+        for tf, frame in cycle_frames.items():
+            cutoff = self._completed_timeframe_boundary(tf, evaluation_time)
+            if cutoff is None or frame.empty or "end_date" not in frame.columns:
+                filtered_frames[tf] = frame
+                continue
+
+            try:
+                end_dates = pd.to_datetime(frame["end_date"], utc=True, errors="coerce")
+                filtered = frame[end_dates <= cutoff].copy()
+                if filtered.empty:
+                    logger.warning("No closed %s cycle rows available as of %s", tf, cutoff.isoformat())
+                    continue
+                filtered_frames[tf] = filtered.reset_index(drop=True)
+            except Exception as exc:
+                logger.error("Failed to filter closed %s cycles: %s", tf, exc, exc_info=True)
+                filtered_frames[tf] = frame
+        return filtered_frames
 
     def _load_cycle_frames(self) -> dict[str, pd.DataFrame]:
         frames = {}
@@ -137,9 +170,8 @@ class CycleStateExtractor:
 
     def _load_base_frames(self) -> dict[str, pd.DataFrame]:
         frames = {}
-        base_dir = self.parquet_dir.parent.parent / "base_data"
         for tf in self.timeframes:
-            csv_path = base_dir / f"BTCUSD_{tf}.csv"
+            csv_path = self.base_data_dir / f"BTCUSD_{tf}.csv"
             if not csv_path.exists():
                 self._base_frame_cache.pop(tf, None)
                 continue
@@ -160,6 +192,31 @@ class CycleStateExtractor:
             except Exception as exc:
                 logger.error("Failed to read base csv for %s: %s", tf, exc, exc_info=True)
         return frames
+
+    def _get_latest_closed_base_row(
+        self,
+        tf: str,
+        base_frames: dict[str, pd.DataFrame],
+        evaluation_time: datetime,
+    ) -> dict[str, Any]:
+        df = base_frames.get(tf)
+        if df is None or df.empty or "date" not in df.columns:
+            return {}
+
+        cutoff = self._completed_timeframe_boundary(tf, evaluation_time)
+        if cutoff is None:
+            return {}
+
+        try:
+            dates = pd.to_datetime(df["date"], utc=True, errors="coerce")
+            matched = df[dates <= cutoff]
+            if matched.empty:
+                return {}
+            row = matched.iloc[-1].to_dict()
+            return row if isinstance(row, dict) else {}
+        except Exception as exc:
+            logger.error("Failed to get latest closed base row for %s: %s", tf, exc, exc_info=True)
+            return {}
 
     def _extract_tf_state(
         self,
@@ -182,7 +239,8 @@ class CycleStateExtractor:
             if candle_data:
                 latest_close = candle_data[-1].get("close")
 
-            latest_analysis = self._get_latest_analysis_snapshot(tf, base_frames)
+            analysis_rows = self._get_cycle_analysis_rows(tf, last, base_frames)
+            latest_analysis = analysis_rows[-1] if analysis_rows else {}
 
             duration = int(last.get("duration_candles", 0) or 0)
             position_pct = self._estimate_position(df, duration)
@@ -498,6 +556,26 @@ class CycleStateExtractor:
 
     def _utc_now_iso(self) -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _to_iso(self, value: datetime) -> str:
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _to_utc_datetime(self, value: Optional[datetime]) -> datetime:
+        if value is None:
+            return datetime.now(timezone.utc)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def _completed_timeframe_boundary(self, tf: str, evaluation_time: datetime) -> Optional[pd.Timestamp]:
+        if tf == "1w":
+            ts = pd.Timestamp(evaluation_time)
+            start_of_week = ts.normalize() - pd.Timedelta(days=ts.weekday())
+            return start_of_week.tz_convert("UTC") if start_of_week.tzinfo else start_of_week.tz_localize("UTC")
+        rule = _TIMEFRAME_FLOOR_RULES.get(tf)
+        if not rule:
+            return None
+        return pd.Timestamp(evaluation_time).floor(rule)
 
     def _to_utc_timestamp(self, value: Any) -> Optional[pd.Timestamp]:
         if value in (None, ""):
