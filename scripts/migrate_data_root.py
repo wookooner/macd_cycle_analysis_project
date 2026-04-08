@@ -10,6 +10,7 @@ from src.common.paths import PROJECT_PATHS
 
 
 DEFAULT_TARGET = Path(r"C:\Users\qw370\macd-cycle-data")
+EXCLUDED_SUFFIXES = {".tmp", ".recovery"}
 MIGRATION_GROUPS = {
     "raw": [
         PROJECT_PATHS.legacy_data_root / "base_data",
@@ -46,10 +47,11 @@ def _sha256(path: Path) -> str:
 
 def _iter_files(root: Path):
     if root.is_file():
-        yield root
+        if root.suffix not in EXCLUDED_SUFFIXES:
+            yield root
         return
     for candidate in root.rglob("*"):
-        if candidate.is_file():
+        if candidate.is_file() and candidate.suffix not in EXCLUDED_SUFFIXES:
             yield candidate
 
 

@@ -71,7 +71,7 @@ class PathConfig:
     @property
     def parquet_dir(self) -> Path:
         override = _env("ANALYSIS_PARQUET_DIR")
-        return Path(override) if override else self.legacy_data_root / "cycle_data" / "structured"
+        return Path(override) if override else self.macd_data_root / "processed" / "cycles_enriched"
 
     @property
     def hierarchy_map_path(self) -> Path:
@@ -81,7 +81,7 @@ class PathConfig:
     @property
     def base_data_dir(self) -> Path:
         override = _env("ANALYSIS_BASE_DATA_DIR")
-        return Path(override) if override else self.legacy_data_root / "base_data"
+        return Path(override) if override else self.macd_data_root / "raw" / "market"
 
     @property
     def update_pipeline_path(self) -> Path:

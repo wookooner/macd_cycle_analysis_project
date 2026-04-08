@@ -197,12 +197,29 @@ def load_project_paths(config_path: Path | None = None) -> ProjectPaths:
     reports_root = data_root / data_cfg.get("reports_root", "reports")
     logs_root = data_root / data_cfg.get("logs_root", "logs")
 
+    repo_legacy_data_root = _resolve_path(project_root, legacy_cfg.get("repo_data_root", "./data"))
+    repo_base_data_dir = _resolve_path(project_root, legacy_cfg.get("base_data_dir", "./data/base_data"))
+    repo_backup_data_dir = _resolve_path(project_root, legacy_cfg.get("backup_data_dir", "./data/backup_data"))
+    repo_cycle_structured_dir = _resolve_path(
+        project_root,
+        legacy_cfg.get("cycle_structured_dir", "./data/cycle_data/structured"),
+    )
+
+    base_data_dir = raw_root / "market"
+    backup_data_dir = interim_root / "temp" / "backup_data"
+    cycle_structured_dir = processed_root / "cycles_enriched"
+
+    if data_root.resolve() == repo_legacy_data_root.resolve():
+        base_data_dir = repo_base_data_dir
+        backup_data_dir = repo_backup_data_dir
+        cycle_structured_dir = repo_cycle_structured_dir
+
     return ProjectPaths(
         project_root=project_root,
         config_path=config_file,
         data_root=data_root,
         runtime_data_root=default_data_root,
-        legacy_data_root=_resolve_path(project_root, legacy_cfg.get("repo_data_root", "./data")),
+        legacy_data_root=repo_legacy_data_root,
         raw_root=raw_root,
         interim_root=interim_root,
         processed_root=processed_root,
@@ -222,9 +239,9 @@ def load_project_paths(config_path: Path | None = None) -> ProjectPaths:
         processed_reversal_events_dir=data_root / data_cfg.get("processed_reversal_events", "processed/reversal_events"),
         processed_features_dir=data_root / data_cfg.get("processed_features", "processed/features"),
         processed_trade_positions_dir=data_root / data_cfg.get("processed_trade_positions", "processed/trade_positions"),
-        base_data_dir=_resolve_path(project_root, legacy_cfg.get("base_data_dir", "./data/base_data")),
-        backup_data_dir=_resolve_path(project_root, legacy_cfg.get("backup_data_dir", "./data/backup_data")),
-        cycle_structured_dir=_resolve_path(project_root, legacy_cfg.get("cycle_structured_dir", "./data/cycle_data/structured")),
+        base_data_dir=base_data_dir,
+        backup_data_dir=backup_data_dir,
+        cycle_structured_dir=cycle_structured_dir,
     )
 
 
