@@ -1,0 +1,32 @@
+project:
+  code_root: .
+  data_root_env: MACD_DATA_ROOT
+  # Resolution order:
+  # 1. MACD_DATA_ROOT environment variable
+  # 2. default_data_root below
+  # 3. repo-internal fallback from src/common/paths.py when config is missing
+  default_data_root: C:/Users/qw370/macd-cycle-data
+
+data:
+  raw_market: raw/market
+  raw_hierarchy: raw/hierarchy
+  raw_trades: raw/trades
+  interim_flattened: interim/flattened
+  interim_joined: interim/joined
+  interim_temp: interim/temp
+  interim_debug: interim/debug
+  processed_cycles_base: processed/cycles_base
+  processed_cycles_enriched: processed/cycles_enriched
+  processed_reversal_events: processed/reversal_events
+  processed_features: processed/features
+  processed_trade_positions: processed/trade_positions
+  dashboard_root: dashboard
+  outputs_root: outputs
+  reports_root: reports
+  logs_root: logs
+
+legacy:
+  repo_data_root: ./data
+  base_data_dir: ./data/base_data
+  backup_data_dir: ./data/backup_data
+  cycle_structured_dir: ./data/cycle_data/structured

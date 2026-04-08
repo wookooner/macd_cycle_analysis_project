@@ -9,6 +9,7 @@ from data_pipeline.collectors.config import DATA_FILES, RAW_DATA_DIR
 from data_pipeline.collectors.new_collcetor import AdvancedBTCDataCollectorV2
 from data_pipeline.indicators.indicator import IndicatorCalculator
 from data_pipeline.pipeline_runner import _merge_futures_into_ohlcv, run_pipeline
+from src.common.paths import PROJECT_PATHS
 
 
 LOGGER = logging.getLogger("live_update_service")
@@ -44,6 +45,7 @@ class LiveUpdateService:
 
         self.collector = AdvancedBTCDataCollectorV2()
         self.indicator_calculator = IndicatorCalculator()
+        PROJECT_PATHS.ensure_runtime_dirs()
 
         now = time.time()
         self.next_market_sync_at = now
@@ -133,6 +135,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     setup_logging(args.log_level)
+    LOGGER.info("Using shared path config: %s", PROJECT_PATHS.config_path)
+    LOGGER.info("Configured data root: %s", PROJECT_PATHS.data_root)
+    LOGGER.info("Legacy raw data dir: %s", RAW_DATA_DIR)
 
     service = LiveUpdateService(
         market_interval_seconds=args.market_interval,

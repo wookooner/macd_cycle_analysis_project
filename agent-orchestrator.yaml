@@ -1,0 +1,26 @@
+port: 3000
+
+defaults:
+  runtime: process              # Windows에서는 나중에 docker로 바꿀 수도 있음
+  agent: claude-code         # ← 당신이 주로 쓰는 에이전트로 변경 (claude-code 추천)
+  workspace: worktree        # 기존 폴더를 안전하게 사용
+  notifiers: [desktop]
+
+projects:
+  macd-cycle-analysis:       # 프로젝트 키 (자유롭게 영어로 지어도 됨, 하이픈 추천)
+    repo: qw370/macd_cycle_analysis_project
+    path: C:/Users/qw370/OneDrive/ドキュメント/GitHub/macd_cycle_analysis_project   # ← 중요! 슬래시(/) 사용
+    defaultBranch: main        # main인지 master인지 확인 후 수정 (git branch로 확인 가능)
+    sessionPrefix: macd
+
+reactions:
+  ci-failed:
+    auto: true
+    action: send-to-agent
+    retries: 2
+  changes-requested:
+    auto: true
+    action: send-to-agent
+  approved-and-green:
+    auto: false                # 처음에는 false로 유지 (자동 머지는 나중에)
+    action: notify

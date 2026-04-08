@@ -24,6 +24,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
+from src.common.paths import PROJECT_PATHS
 
 
 # ── 타임프레임별 캔들 duration ────────────────────────────────────────────────
@@ -336,6 +337,8 @@ class CycleHierarchyMapper:
 
 def _find_project_root() -> Path:
     """프로젝트 루트를 찾는 헬퍼. data/base_data 디렉토리가 있는 곳이 루트."""
+    if PROJECT_PATHS.project_root.exists():
+        return PROJECT_PATHS.project_root
     for current in [Path(__file__).resolve().parent] + list(
         Path(__file__).resolve().parents
     ):
@@ -352,7 +355,7 @@ def _find_project_root() -> Path:
 def main():
     """메인 실행 함수"""
     project_root = _find_project_root()
-    data_dir = project_root / "data" / "cycle_data" / "structured"
+    data_dir = PROJECT_PATHS.cycle_structured_dir
 
     print("=" * 60)
     print("🚀 사이클 계층 구조 매핑 시작")

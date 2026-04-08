@@ -1,0 +1,61 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Trading bot local secrets
+trading_bot/.env
+trading_bot/.env.local
+
+# Python environment
+.venv/
+venv/
+.uv-cache/
+.uv-python/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebook and editor noise
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# Frontend / build output
+node_modules/
+dist/
+build/
+coverage/
+
+# Large data and generated artifacts
+data/
+outputs/
+reports/
+logs/
+analysis_results/
+pattern_discovery_results/
+feature_analysis_report/
+feature_analysis/output/
+trading_bot/logs/
+*.parquet
+*.feather
+*.arrow
+*.pkl
+*.joblib
+*.npy
+*.npz
+*.tmp
+*.recovery
+
+# Keep lightweight reproducible examples
+!sample_data/
+!sample_data/**
+!tests/fixtures/
+!tests/fixtures/**

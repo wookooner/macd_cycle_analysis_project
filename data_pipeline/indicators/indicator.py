@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from data_pipeline.utils.io import atomic_write_csv, prune_backup_files
+from data_pipeline.utils.io import atomic_write_csv, load_csv_with_recovery, prune_backup_files
+from src.common.paths import PROJECT_PATHS
 
 warnings.filterwarnings("ignore")
 
@@ -312,7 +313,11 @@ class IndicatorCalculator:
         self.logger.info(f"파일 처리 시작: {file_path}")
 
         try:
-            df = pd.read_csv(file_path)
+            df = load_csv_with_recovery(
+                file_path,
+                required_columns=["unix"],
+                restore_in_place=output_path is None or output_path == file_path,
+            )
             self.logger.info(f"데이터 로드 완료: {len(df)} rows, {len(df.columns)} columns")
 
             if "unix" in df.columns:
@@ -370,14 +375,14 @@ def process_multiple_files(file_paths, force_recalculate=False, recalc_last_n=50
 
 
 if __name__ == "__main__":
-    data_dir = Path("data/base_data")
+    data_dir = PROJECT_PATHS.base_data_dir
 
     print("=== 경로 확인 ===")
     print(f"데이터 디렉터리: {data_dir.resolve()}")
     print(f"디렉터리 존재 여부: {data_dir.exists()}")
 
     if not data_dir.exists():
-        print("데이터 디렉터리 'data/base_data'를 찾을 수 없습니다.")
+        print(f"데이터 디렉터리를 찾을 수 없습니다: {data_dir}")
         raise SystemExit(1)
 
     files = ["BTCUSD_1h.csv", "BTCUSD_4h.csv", "BTCUSD_1d.csv", "BTCUSD_1w.csv", "BTCUSD_1m.csv"]

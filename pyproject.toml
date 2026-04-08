@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "macd-cycle-analysis"
+version = "0.1.0"
+description = "Code-first MACD cycle analysis research repository."
+requires-python = ">=3.11"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["src*", "data_pipeline*", "trading_bot*"]

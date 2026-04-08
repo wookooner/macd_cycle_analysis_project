@@ -15,8 +15,9 @@ from data_pipeline.feature_extractors.macd_historgram_change_feature.feature_ext
     CycleFeatureCalculator,
     StructuredCycleProcessor,
 )
+from src.common.paths import PROJECT_PATHS
 
-project_root = Path(__file__).resolve().parents[2]
+project_root = PROJECT_PATHS.project_root
 
 _NON_INDICATOR_KEYWORDS = ["oi", "funding", "interest", "backfill"]
 _OPTIONAL_CANDLE_COLS = [
@@ -30,6 +31,14 @@ _OPTIONAL_CANDLE_COLS = [
     "ppo_hist",
     "oi",
     "oi_usd",
+    "oi_change",
+    "oi_change_pct",
+    "oi_contracts",
+    "oi_contracts_change",
+    "oi_contracts_change_pct",
+    "oi_notional",
+    "oi_notional_change",
+    "oi_notional_change_pct",
     "funding_rate",
     "ma_7",
     "ma_25",
@@ -59,7 +68,7 @@ def _has_macd_hist(file_path: Path) -> bool:
 
 
 def find_timeframe_files():
-    base_data_path = project_root / "data" / "base_data"
+    base_data_path = PROJECT_PATHS.base_data_dir
     if not base_data_path.exists():
         return {}
 
@@ -236,7 +245,7 @@ def save_cycle_results_v3(cycle_records: List[Dict], timeframe: str):
     if not cycle_records:
         return False
 
-    output_path = project_root / "data" / "cycle_data" / "structured"
+    output_path = PROJECT_PATHS.cycle_structured_dir
     output_path.mkdir(parents=True, exist_ok=True)
     cycle_file = output_path / f"cycles_{timeframe}.parquet"
     df = pd.DataFrame(cycle_records)
@@ -247,7 +256,7 @@ def save_cycle_results_v3(cycle_records: List[Dict], timeframe: str):
 def run_fixed_detection():
     algorithm, config = load_algorithm()
     funding_rate_df = None
-    funding_rate_path = project_root / "data" / "base_data" / "BTCUSDT_funding_rate.csv"
+    funding_rate_path = PROJECT_PATHS.base_data_dir / "BTCUSDT_funding_rate.csv"
     if funding_rate_path.exists():
         funding_rate_df = StructuredCycleProcessor.load_funding_rate(funding_rate_path)
 

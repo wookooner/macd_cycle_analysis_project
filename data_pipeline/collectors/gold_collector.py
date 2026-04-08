@@ -41,12 +41,13 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from data_pipeline.utils.io import atomic_write_csv, prune_backup_files
+from src.common.paths import PROJECT_PATHS
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────────
-BASE_DIR        = Path(__file__).resolve().parents[2]
-DATA_DIR        = BASE_DIR / "data"
-RAW_DATA_DIR    = DATA_DIR / "base_data"
-BACKUP_DATA_DIR = DATA_DIR / "backup_data"
+BASE_DIR        = PROJECT_PATHS.project_root
+DATA_DIR        = PROJECT_PATHS.legacy_data_root
+RAW_DATA_DIR    = PROJECT_PATHS.base_data_dir
+BACKUP_DATA_DIR = PROJECT_PATHS.backup_data_dir
 
 # ── API 설정 ───────────────────────────────────────────────────────────────────
 API_NINJAS_BASE_URL = "https://api.api-ninjas.com/v1"
@@ -108,6 +109,7 @@ DECIMAL_PLACES = {
 
 
 def _ensure_directories():
+    PROJECT_PATHS.ensure_runtime_dirs()
     for d in [DATA_DIR, RAW_DATA_DIR, BACKUP_DATA_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
