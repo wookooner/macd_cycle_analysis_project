@@ -86,7 +86,7 @@ class PathConfig:
     @property
     def update_pipeline_path(self) -> Path:
         override = _env("UPDATE_PIPELINE_PATH")
-        return Path(override) if override else self.analysis_project_root / "update_pipeline.py"
+        return Path(override) if override else self.analysis_project_root / "scripts" / "update_pipeline.py"
 
     @property
     def bot_dir(self) -> Path:

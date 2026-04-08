@@ -6,6 +6,8 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 from datetime import datetime
 
+from src.common.paths import PROJECT_PATHS
+
 class IndicatorPredictor:
     """
     현재 진행중인 캔들(T+0)의 마감 상태와, 그를 기반으로 다음 캔들(T+1)을
@@ -143,7 +145,7 @@ def run_prediction_step(predictor: IndicatorPredictor, step_name: str, prev_stat
         except ValueError: print("오류: 유효한 숫자를 입력하세요.")
 
 if __name__ == "__main__":
-    CSV_FILE_PATH = "data/base_data/BTCUSD_4h.csv"
+    CSV_FILE_PATH = str(PROJECT_PATHS.base_data_dir / "BTCUSD_4h.csv")
     
     try:
         predictor = IndicatorPredictor(CSV_FILE_PATH)

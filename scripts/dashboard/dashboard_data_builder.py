@@ -6,11 +6,13 @@ from typing import Any
 
 import pandas as pd
 
+from src.common.paths import PROJECT_PATHS
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-STRUCTURED_DIR = PROJECT_ROOT / "data" / "cycle_data" / "structured"
-DASHBOARD_DATA_DIR = PROJECT_ROOT / "data" / "dashboard_data"
-DASHBOARD_META_DIR = PROJECT_ROOT / "data" / "dashboard_meta"
+
+PROJECT_ROOT = PROJECT_PATHS.project_root
+STRUCTURED_DIR = PROJECT_PATHS.cycle_structured_dir
+DASHBOARD_DATA_DIR = PROJECT_PATHS.dashboard_root / "candles"
+DASHBOARD_META_DIR = PROJECT_PATHS.dashboard_root / "meta"
 SUPPORTED_TIMEFRAMES = ("1m", "1h", "4h", "1d", "1w")
 BASE_FIELDS = {
     "cycle_id",

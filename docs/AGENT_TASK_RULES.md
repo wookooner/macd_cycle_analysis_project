@@ -1,5 +1,7 @@
 # Agent Task Rules
 
+Read `docs/AGENT_STARTUP_CHECKLIST.md` first when entering this repository as an implementation agent.
+
 ## Agents May Do
 
 - implement code

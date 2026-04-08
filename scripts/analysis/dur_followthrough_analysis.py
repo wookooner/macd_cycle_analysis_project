@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common.paths import PROJECT_PATHS
+
 
 TIMEFRAMES = ("1d", "4h", "1h")
 DEFAULT_CONFIRM_DUR = 3
@@ -31,10 +33,7 @@ class CycleInfo:
 
 
 def find_project_root() -> Path:
-    for candidate in [Path(__file__).resolve().parent] + list(Path(__file__).resolve().parents):
-        if (candidate / "data" / "base_data").exists():
-            return candidate
-    return Path.cwd()
+    return PROJECT_PATHS.project_root
 
 
 def calculate_directions(macd_hist: pd.Series) -> list[int]:
@@ -126,7 +125,7 @@ def prepare_working_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, list[int]
 
 
 def load_timeframe_data(project_root: Path, timeframe: str) -> pd.DataFrame:
-    csv_path = project_root / "data" / "base_data" / f"BTCUSD_{timeframe}.csv"
+    csv_path = PROJECT_PATHS.base_data_dir / f"BTCUSD_{timeframe}.csv"
     if not csv_path.exists():
         raise FileNotFoundError(f"missing timeframe csv: {csv_path}")
 
@@ -420,7 +419,7 @@ def run_noise_sequence_search(
     noise_count: int = DEFAULT_PATTERN_NOISE_COUNT,
 ) -> dict[str, Any]:
     project_root = find_project_root()
-    output_dir = project_root / "analysis_results" / "dur_followthrough_analysis"
+    output_dir = PROJECT_PATHS.outputs_root / "analysis_results" / "dur_followthrough_analysis"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     all_cases: list[pd.DataFrame] = []
@@ -678,7 +677,7 @@ def run_early_noise_analysis(
     noise_positions: tuple[int, ...] = DEFAULT_NOISE_POSITIONS,
 ) -> pd.DataFrame:
     project_root = find_project_root()
-    output_dir = project_root / "analysis_results" / "dur_followthrough_analysis"
+    output_dir = PROJECT_PATHS.outputs_root / "analysis_results" / "dur_followthrough_analysis"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     all_cases: list[pd.DataFrame] = []
@@ -713,7 +712,7 @@ def run_early_noise_analysis(
 
 def run(confirm_dur: int = DEFAULT_CONFIRM_DUR) -> dict[str, dict[str, Any]]:
     project_root = find_project_root()
-    output_dir = project_root / "analysis_results" / "dur_followthrough_analysis"
+    output_dir = PROJECT_PATHS.outputs_root / "analysis_results" / "dur_followthrough_analysis"
 
     timeframe_cases: dict[str, pd.DataFrame] = {}
     summaries: dict[str, dict[str, Any]] = {}
@@ -731,7 +730,7 @@ def run(confirm_dur: int = DEFAULT_CONFIRM_DUR) -> dict[str, dict[str, Any]]:
 def run_multi(confirm_durs: tuple[int, ...] = DEFAULT_CONFIRM_DURS) -> dict[int, dict[str, dict[str, Any]]]:
     results: dict[int, dict[str, dict[str, Any]]] = {}
     project_root = find_project_root()
-    output_dir = project_root / "analysis_results" / "dur_followthrough_analysis"
+    output_dir = PROJECT_PATHS.outputs_root / "analysis_results" / "dur_followthrough_analysis"
 
     for confirm_dur in confirm_durs:
         results[int(confirm_dur)] = run(confirm_dur=int(confirm_dur))

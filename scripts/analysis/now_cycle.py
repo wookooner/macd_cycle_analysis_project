@@ -18,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.common.paths import PROJECT_PATHS
+
 
 KST_TZ = "Asia/Seoul"
 SHORT_CYCLE_CONTEXT_THRESHOLD = 5
@@ -26,13 +28,7 @@ SHORT_CYCLE_CONTEXT_THRESHOLD = 5
 # ?? ?꾨줈?앺듃 猷⑦듃 ?먯깋 ?????????????????????????????????????????????????????
 
 def _find_project_root() -> Path:
-    for current in [Path(__file__).resolve().parent] + list(Path(__file__).resolve().parents):
-        if (current / "data" / "base_data").exists():
-            return current
-    for current in [Path.cwd()] + list(Path.cwd().parents):
-        if (current / "data" / "base_data").exists():
-            return current
-    return Path(__file__).resolve().parent
+    return PROJECT_PATHS.project_root
 
 
 # ?? ?곗씠??濡쒕뱶 ????????????????????????????????????????????????????????????
@@ -642,8 +638,8 @@ def print_latest_candle_block(tf: str, live_state: dict[str, Any] | None) -> Non
 
 def analyze_current_cycle_hierarchy() -> None:
     project_root = _find_project_root()
-    base_path = str(project_root / "data" / "cycle_data" / "structured")
-    base_data_path = str(project_root / "data" / "base_data")
+    base_path = str(PROJECT_PATHS.cycle_structured_dir)
+    base_data_path = str(PROJECT_PATHS.base_data_dir)
     hierarchy_path = os.path.join(base_path, "cycle_hierarchy_map.json")
 
     print(f"프로젝트: {project_root}")
