@@ -10,6 +10,7 @@
 - `analysis_results/`
 - `pattern_discovery_results/`
 - `feature_analysis_report/`
+- `feature_analysis/output/`
 - `__pycache__/`
 
 ## Recommended Cleanup Sequence
@@ -44,10 +45,16 @@ Then review what remains:
 
 ```powershell
 git status --short
-git ls-files | Select-String -Pattern '(^data/|^analysis_results/|^pattern_discovery_results/|^feature_analysis_report/|__pycache__/|\.parquet$|\.png$|\.tmp$|\.pyc$)'
+git ls-files | Select-String -Pattern '(^data/|^analysis_results/|^pattern_discovery_results/|^feature_analysis_report/|^feature_analysis/output/|__pycache__/|\.parquet$|\.png$|\.tmp$|\.pyc$)'
 ```
 
 ## Policy After Cleanup
 
 - Keep only code, docs, configs, tests, and lightweight sample data in Git.
 - Keep raw data, intermediate files, reports, plots, and logs outside Git.
+
+## Follow-Up Candidates
+
+- `cycle_detect/data/base_data/*.csv`
+- `data_pipeline/data/cycle_data/structured/*.json`
+- any dashboard payload dump that becomes a generated artifact instead of sample data
