@@ -22,6 +22,23 @@ from binance.error import ClientError
 from config import *
 
 
+BACKUP_KEEP_RECENT = 3
+
+
+def _prune_recent_backups(backup_dir: Path, keep_recent: int = BACKUP_KEEP_RECENT):
+    groups: dict[str, list[Path]] = {}
+    for file_path in backup_dir.iterdir():
+        if not file_path.is_file() or ".backup_" not in file_path.name:
+            continue
+        base_name = file_path.name.split(".backup_", 1)[0]
+        groups.setdefault(base_name, []).append(file_path)
+
+    for files in groups.values():
+        ordered = sorted(files, key=lambda item: (item.stat().st_mtime, item.name))
+        for file_path in ordered[:-keep_recent]:
+            file_path.unlink(missing_ok=True)
+
+
 # ─── 선물 전용 상수 ────────────────────────────────────────────────────────────
 # 바이낸스 무기한 선물 심볼 (현물 BTCUSD와 구분)
 FUTURES_SYMBOL = "BTCUSDT"
@@ -42,6 +59,12 @@ OI_HIST_LIMIT      = 500   # OI 히스토리 API 최대 limit
 # 기존 OHLCV CSV와 분리해서 혼용을 방지
 FUTURES_DATA_FILES = {
     "funding_rate": "BTCUSDT_funding_rate.csv",
+    "oi_contracts_1h": "BTCUSDT_oi_contracts_1h.csv",
+    "oi_contracts_4h": "BTCUSDT_oi_contracts_4h.csv",
+    "oi_contracts_1d": "BTCUSDT_oi_contracts_1d.csv",
+    "oi_notional_1h": "BTCUSDT_oi_notional_1h.csv",
+    "oi_notional_4h": "BTCUSDT_oi_notional_4h.csv",
+    "oi_notional_1d": "BTCUSDT_oi_notional_1d.csv",
     "oi_1h":        "BTCUSDT_oi_1h.csv",
     "oi_4h":        "BTCUSDT_oi_4h.csv",
     "oi_1d":        "BTCUSDT_oi_1d.csv",
@@ -56,6 +79,19 @@ DECIMAL_PLACES = {
     "funding_rate": 8,      # 펀딩비: 소수점 8자리 (백분율 포함)
     "oi": 2,                # OI: 소수점 2자리
     "oi_change_pct": 4,     # OI 변화율: 소수점 4자리
+}
+
+OI_DATA_SPECS = {
+    "contracts": {
+        "value_col": "oi_contracts",
+        "change_col": "oi_contracts_change",
+        "change_pct_col": "oi_contracts_change_pct",
+    },
+    "notional": {
+        "value_col": "oi_notional",
+        "change_col": "oi_notional_change",
+        "change_pct_col": "oi_notional_change_pct",
+    },
 }
 
 
@@ -331,28 +367,79 @@ class AdvancedBTCDataCollectorV2:
         df = pd.DataFrame(all_rows)
         df['unix']   = df['timestamp'] // 1000
         df['date']   = pd.to_datetime(df['unix'], unit='s', utc=True).dt.strftime('%Y-%m-%d %H:%M:%S')
-        df['oi']     = pd.to_numeric(df['sumOpenInterest'],      errors='coerce')  # 계약수
-        df['oi_usd'] = pd.to_numeric(df['sumOpenInterestValue'], errors='coerce')  # USDT 환산
+        df['oi_contracts'] = pd.to_numeric(df['sumOpenInterest'],      errors='coerce')  # 계약수 기준
+        df['oi_notional']  = pd.to_numeric(df['sumOpenInterestValue'], errors='coerce')  # 명목가치 기준(USDT)
         df['symbol'] = FUTURES_SYMBOL
         df['period'] = period
 
         # OI 변화량 (절대값보다 변화율이 분석에 더 유용)
         df = df.sort_values('unix').reset_index(drop=True)
-        df['oi_change']     = df['oi'].diff()
-        df['oi_change_pct'] = df['oi'].pct_change() * 100
+        df['oi_contracts_change']     = df['oi_contracts'].diff()
+        df['oi_contracts_change_pct'] = df['oi_contracts'].pct_change() * 100
+        df['oi_notional_change']      = df['oi_notional'].diff()
+        df['oi_notional_change_pct']  = df['oi_notional'].pct_change() * 100
 
-        result = df[['unix', 'date', 'symbol', 'period', 'oi', 'oi_usd',
-                     'oi_change', 'oi_change_pct']].copy()
+        result = df[['unix', 'date', 'symbol', 'period',
+                     'oi_contracts', 'oi_contracts_change', 'oi_contracts_change_pct',
+                     'oi_notional', 'oi_notional_change', 'oi_notional_change_pct']].copy()
         result = result.drop_duplicates(subset=['unix'])
         
         # OI 데이터 반올림
-        result['oi']            = result['oi'].round(DECIMAL_PLACES['oi'])
-        result['oi_usd']        = result['oi_usd'].round(DECIMAL_PLACES['oi'])
-        result['oi_change']     = result['oi_change'].round(DECIMAL_PLACES['oi'])
-        result['oi_change_pct'] = result['oi_change_pct'].round(DECIMAL_PLACES['oi_change_pct'])
+        for col in ['oi_contracts', 'oi_contracts_change', 'oi_notional', 'oi_notional_change']:
+            result[col] = result[col].round(DECIMAL_PLACES['oi'])
+        for col in ['oi_contracts_change_pct', 'oi_notional_change_pct']:
+            result[col] = result[col].round(DECIMAL_PLACES['oi_change_pct'])
         
         self.logger.info(f"OI {period} 포맷 완료: {len(result)}행")
         return result
+
+    def _build_oi_variant_df(self, raw_df: pd.DataFrame, variant: str) -> pd.DataFrame:
+        spec = OI_DATA_SPECS[variant]
+        return raw_df[['unix', 'date', 'symbol', 'period',
+                       spec['value_col'], spec['change_col'], spec['change_pct_col']]].copy()
+
+    def _build_oi_legacy_df(self, raw_df: pd.DataFrame) -> pd.DataFrame:
+        legacy_df = raw_df[['unix', 'date', 'symbol', 'period',
+                            'oi_contracts', 'oi_notional', 'oi_contracts_change', 'oi_contracts_change_pct']].copy()
+        legacy_df = legacy_df.rename(columns={
+            'oi_contracts': 'oi',
+            'oi_notional': 'oi_usd',
+            'oi_contracts_change': 'oi_change',
+            'oi_contracts_change_pct': 'oi_change_pct',
+        })
+        return legacy_df
+
+    def _combine_frames(self, existing_df: pd.DataFrame, new_df: pd.DataFrame, key_col: str = 'unix') -> pd.DataFrame:
+        if existing_df is None or existing_df.empty:
+            return new_df.copy() if new_df is not None else pd.DataFrame()
+        if new_df is None or new_df.empty:
+            return existing_df.copy()
+
+        combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+        combined.drop_duplicates(subset=[key_col], keep='last', inplace=True)
+        combined.sort_values(key_col, inplace=True)
+        return combined
+
+    def _legacy_to_contracts_df(self, legacy_df: pd.DataFrame) -> pd.DataFrame:
+        if legacy_df is None or legacy_df.empty or 'oi' not in legacy_df.columns:
+            return pd.DataFrame()
+        contracts_df = legacy_df[['unix', 'date', 'symbol', 'period', 'oi', 'oi_change', 'oi_change_pct']].copy()
+        return contracts_df.rename(columns={
+            'oi': 'oi_contracts',
+            'oi_change': 'oi_contracts_change',
+            'oi_change_pct': 'oi_contracts_change_pct',
+        })
+
+    def _legacy_to_notional_df(self, legacy_df: pd.DataFrame) -> pd.DataFrame:
+        if legacy_df is None or legacy_df.empty or 'oi_usd' not in legacy_df.columns:
+            return pd.DataFrame()
+        notional_df = legacy_df[['unix', 'date', 'symbol', 'period', 'oi_usd']].copy()
+        notional_df = notional_df.rename(columns={'oi_usd': 'oi_notional'})
+        notional_df['oi_notional'] = pd.to_numeric(notional_df['oi_notional'], errors='coerce')
+        notional_df = notional_df.sort_values('unix').reset_index(drop=True)
+        notional_df['oi_notional_change'] = notional_df['oi_notional'].diff()
+        notional_df['oi_notional_change_pct'] = notional_df['oi_notional'].pct_change() * 100
+        return notional_df
 
     # ─── 저장 공통 유틸 ───────────────────────────────────────────────────────
 
@@ -369,6 +456,7 @@ class AdvancedBTCDataCollectorV2:
             backup_path = BACKUP_DATA_DIR / f"{file_path.name}.backup_{ts}"
             try:
                 shutil.copy2(file_path, backup_path)
+                _prune_recent_backups(BACKUP_DATA_DIR, keep_recent=BACKUP_KEEP_RECENT)
                 self.logger.info(f"백업: {backup_path.name}")
             except Exception as e:
                 self.logger.error(f"백업 실패: {e}")
@@ -440,13 +528,27 @@ class AdvancedBTCDataCollectorV2:
             return
 
         self.logger.info(f"===== OI {period} 업데이트 =====")
-        file_key    = f"oi_{period}"
-        file_path   = RAW_DATA_DIR / FUTURES_DATA_FILES[file_key]
-        existing_df = self._load_existing(file_path)
+        contracts_file_key = f"oi_contracts_{period}"
+        notional_file_key = f"oi_notional_{period}"
+        legacy_file_key = f"oi_{period}"
+        contracts_file_path = RAW_DATA_DIR / FUTURES_DATA_FILES[contracts_file_key]
+        notional_file_path = RAW_DATA_DIR / FUTURES_DATA_FILES[notional_file_key]
+        legacy_file_path = RAW_DATA_DIR / FUTURES_DATA_FILES[legacy_file_key]
+        contracts_existing = self._load_existing(contracts_file_path)
+        notional_existing = self._load_existing(notional_file_path)
+        legacy_existing = self._load_existing(legacy_file_path)
 
-        if not existing_df.empty:
-            last_unix   = existing_df['unix'].iloc[-1]
-            start_fetch = datetime.fromtimestamp(last_unix, tz=timezone.utc)
+        contracts_existing = self._combine_frames(self._legacy_to_contracts_df(legacy_existing), contracts_existing)
+        notional_existing = self._combine_frames(self._legacy_to_notional_df(legacy_existing), notional_existing)
+
+        existing_candidates = [
+            df['unix'].iloc[-1]
+            for df in [contracts_existing, notional_existing, legacy_existing]
+            if not df.empty and 'unix' in df.columns
+        ]
+
+        if existing_candidates:
+            start_fetch = datetime.fromtimestamp(max(existing_candidates), tz=timezone.utc)
         elif start_dt is not None:
             start_fetch = start_dt
         else:
@@ -454,8 +556,20 @@ class AdvancedBTCDataCollectorV2:
             from datetime import timedelta
             start_fetch = datetime.now(timezone.utc) - timedelta(days=30)
 
-        new_df = self._fetch_oi_history(period, start_fetch, datetime.now(timezone.utc))
-        self._merge_and_save(existing_df, new_df, file_path)
+        raw_df = self._fetch_oi_history(period, start_fetch, datetime.now(timezone.utc))
+        if raw_df is None:
+            return
+
+        contracts_new = self._build_oi_variant_df(raw_df, "contracts") if not raw_df.empty else pd.DataFrame()
+        notional_new = self._build_oi_variant_df(raw_df, "notional") if not raw_df.empty else pd.DataFrame()
+        legacy_new = self._build_oi_legacy_df(raw_df) if not raw_df.empty else pd.DataFrame()
+
+        if not contracts_existing.empty or not contracts_new.empty:
+            self._merge_and_save(contracts_existing, contracts_new, contracts_file_path)
+        if not notional_existing.empty or not notional_new.empty:
+            self._merge_and_save(notional_existing, notional_new, notional_file_path)
+        if not legacy_new.empty:
+            self._merge_and_save(legacy_existing, legacy_new, legacy_file_path)
 
     def update_all_ohlcv(self):
         """모든 타임프레임 OHLCV 업데이트"""

@@ -1,0 +1,53 @@
+:root {
+  --bg: #f4efe6;
+  --bg-soft: #fbf7ef;
+  --panel: rgba(255, 251, 245, 0.9);
+  --panel-strong: #fffdf8;
+  --line: rgba(126, 96, 55, 0.16);
+  --line-strong: rgba(126, 96, 55, 0.28);
+  --text: #261d12;
+  --muted: #786856;
+  --accent: #0f766e;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --accent-strong: #115e59;
+  --warm: #c2410c;
+  --shadow: 0 20px 40px rgba(69, 46, 18, 0.08);
+  font-family: "Pretendard", "Segoe UI", "Noto Sans KR", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(194, 65, 12, 0.12), transparent 25%),
+    linear-gradient(180deg, #fcfaf4, #f4efe6 48%, #efe7d8);
+  line-height: 1.45;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}

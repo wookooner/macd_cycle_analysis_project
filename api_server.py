@@ -2,16 +2,53 @@
 Reads parquet + hierarchy_map directly, same logic as the original working data builder.
 """
 import json
+import logging
+import threading
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
+import argparse
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+from base_data_api import router as base_data_router
+from dashboard_api import router as dashboard_router
+from live_update_service import LiveUpdateService, setup_logging
+
+
+LOGGER = logging.getLogger("integrated_api_server")
+router = APIRouter()
+
+
+def create_app(enable_live_update: bool = False) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if enable_live_update:
+            LOGGER.info("Starting live update service in background thread")
+            service = LiveUpdateService(
+                market_interval_seconds=15,
+                futures_interval_seconds=60,
+                cycle_interval_seconds=3600,
+                indicator_recalc_rows=120,
+            )
+            thread = threading.Thread(target=service.run_forever, daemon=True, name="live-update-service")
+            thread.start()
+            app.state.live_update_service = service
+            app.state.live_update_thread = thread
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    app.include_router(router)
+    app.include_router(dashboard_router)
+    app.include_router(base_data_router)
+    return app
+
+
+app = create_app()
 
 BASE_DIR = Path("data/cycle_data/structured")
 _oi_cache: dict = {}
@@ -39,13 +76,22 @@ def _get_oi_lookup(tf: str) -> tuple:
     Both cached in _oi_cache[tf]."""
     if tf in _oi_cache:
         return _oi_cache[tf]
-    oi_path = Path("data/base_data") / f"BTCUSDT_oi_{tf}.csv"
+    oi_contracts_path = Path("data/base_data") / f"BTCUSDT_oi_contracts_{tf}.csv"
+    oi_legacy_path = Path("data/base_data") / f"BTCUSDT_oi_{tf}.csv"
     ohlcv_path = Path("data/base_data") / f"BTCUSD_{tf}.csv"
-    if not oi_path.exists() or not ohlcv_path.exists():
+    if not ohlcv_path.exists():
         _oi_cache[tf] = ({}, {})
         return ({}, {})
     try:
-        oi_df = pd.read_csv(oi_path, usecols=["date", "oi"])
+        if oi_contracts_path.exists():
+            oi_df = pd.read_csv(oi_contracts_path, usecols=["date", "oi_contracts"]).rename(
+                columns={"oi_contracts": "oi"}
+            )
+        elif oi_legacy_path.exists():
+            oi_df = pd.read_csv(oi_legacy_path, usecols=["date", "oi"])
+        else:
+            _oi_cache[tf] = ({}, {})
+            return ({}, {})
         oi_df["date"] = pd.to_datetime(oi_df["date"])
         oi_df = oi_df.dropna(subset=["oi"])
 
@@ -291,7 +337,7 @@ def _process_tf(tf: str, H: dict) -> list:
     return results
 
 
-@app.get("/api/dashboard")
+@router.get("/api/dashboard")
 def get_dashboard_data():
     try:
         H = _load_hierarchy()
@@ -315,7 +361,7 @@ def get_dashboard_data():
         return {"error": str(e), "h1": [], "h4": [], "d1": []}
 
 
-@app.get("/api/cycles/{timeframe}")
+@router.get("/api/cycles/{timeframe}")
 def get_cycle_data(timeframe: str):
     try:
         H = _load_hierarchy()
@@ -324,7 +370,7 @@ def get_cycle_data(timeframe: str):
         traceback.print_exc()
         return {"error": str(e)}
 
-@app.get("/api/debug")
+@router.get("/api/debug")
 def debug_info():
     """Diagnostic info for troubleshooting."""
     from collections import Counter
@@ -369,3 +415,31 @@ def _process_tf_debug(tf, H):
         "o1d_zero": sum(1 for r in results if r.get("o1d", 0) == 0),
         "sample": results[0] if results else None,
     }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Integrated API server for cycle, stats dashboard, chart dashboard, and optional live updates.")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind.")
+    parser.add_argument("--log-level", default="info", help="Uvicorn log level.")
+    parser.add_argument("--with-live-update", action="store_true", help="Start live update service in the same process.")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    setup_logging(args.log_level.upper())
+
+    import uvicorn
+
+    uvicorn.run(
+        create_app(enable_live_update=args.with_live_update),
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level.lower(),
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

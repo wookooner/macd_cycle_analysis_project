@@ -124,3 +124,23 @@ class DecisionLogger:
             return records
         except Exception:
             return []
+
+    def get_today_execution_count(self) -> int:
+        """오늘 실행된 order_executed 건수 반환 (RULE 7: 일일 한도 체크용)"""
+        path = self._get_log_path()
+        if not path.exists():
+            return 0
+        today = datetime.utcnow().strftime("%Y-%m-%dT")
+        count = 0
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line.strip())
+                        if rec.get("event") == "order_executed" and rec.get("timestamp", "").startswith(today):
+                            count += 1
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            pass
+        return count

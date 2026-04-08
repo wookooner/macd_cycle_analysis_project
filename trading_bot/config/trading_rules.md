@@ -1,128 +1,169 @@
-# BTC MACD Cycle Chain 매매 규칙서
+# BTC MACD 사이클 트레이딩 규칙 (v1.0)
 
-> 이 문서는 AI 매매 판단 엔진이 매 호출 시 읽는 규칙서입니다.
-> 분석 결과가 업데이트되면 이 문서를 수정하세요.
-> AI는 이 문서의 규칙에 따라 진입/청산/사이징을 결정합니다.
+**근거:** 9년(2017~2025) BTC 데이터, 6,108개 완전 4레벨 체인 통계 분석
 
 ---
 
-## 1. 핵심 프레임워크
+## 1. 시장 구조 이해
 
-### 사이클 정의
-- MACD 히스토그램 diff()가 양수(+1)이면 UP, 음수(-1)이면 DOWN
-- MAX_TOLERANCE=2: 1-2개 반대방향 캔들은 노이즈로 허용
-- 3개+ 연속 반대방향 = 실제 전환 확인
-- 사이클은 엄격히 UP↔DOWN 교대
+### 사이클 방향 체인 (n_up)
+market_state.chain 에서 n_up (0~4) = 현재 UP 방향인 타임프레임 수.
 
-### n_up 계단 (핵심 방향 지표)
-4개 TF 중 UP 개수(0~4). 9년간 단조 증가 수익률 계단, 역전 0건.
-- n_up=4 → 풀사이즈 롱 (이론WR 98.1%, 실현WR 93.3%)
-- n_up=3 → 롱 (4h 미정렬 시 50%)
-- n_up=2 → 중립 (콤보별 분기)
-- n_up=1 → 숏 (4h 미정렬 시 50%)
-- n_up=0 → 풀사이즈 숏 (이론WR 98.0%, 실현WR ~90%)
-
-### 1h cycle_type = 가격 방향 (100% 일치)
-영향력 순서: 1h > 4h > 1d > 1w
+| n_up | 콤보 예시 | 포지션 방향 | 실현 WR | 특이사항 |
+|:---:|:---|:---:|:---:|:---|
+| 4 | UUUU | LONG | 93.3% | 풀사이즈, 조건 불문 |
+| 3 | DUUU, UDUU, UUDU | LONG | ~75% | CVD 반드시 확인 |
+| 2 | DDUU, UUDD 등 | 조건부 | ~50% (필터前) | 트리플 필터 필수 |
+| 1 | DDDU, DDUD, DUDD | SHORT | ~75% | CVD 반드시 확인 |
+| 0 | DDDD | SHORT | ~93% | 풀사이즈, 조건 불문 |
 
 ---
 
-## 2. 콤보별 실현 WR
+## 2. HARD RULES (절대 규칙 — 예외 없음)
 
-### n_up=4
-| 콤보 | 방향 | 실현WR | 비고 |
-|------|------|--------|------|
-| UUUU | LONG | 93.3% | 무조건 롱 |
+### RULE 1: n_up 방향 위반 금지
+- n_up=4 또는 3 → SHORT/REVERSE_TO_SHORT 절대 금지
+- n_up=0 또는 1 → LONG/REVERSE_TO_LONG 절대 금지
+- 위반 시 실적: 전건 손실 (통계 11건 100% 손실)
+- **의심되면 HOLD. 방향 모호시 HOLD.**
 
-### n_up=3
-| 콤보 | 방향 | 실현WR | 스위트스팟 |
-|------|------|--------|-----------|
-| DUUU | LONG | ~85%+ | dur≥8 + MACD음수 → 96.4% |
-| UDUU | LONG | ~80%+ | |
-| UUDU | LONG | ~78% | |hist|>82 + 4h late → 94.6% |
-| ⚠️ UUUD | 회피 | 숏WR 38.6% | 거래하지 않음 |
+### RULE 2: 짧은 사이클 진입 금지
+- market_state.timeframes["1h"].duration < 5 → HOLD
+- 확인 비용이 기대 수익의 ~99%를 잠식, 실현 WR 47.5%
+- 이전 사이클 duration ≤ 4였다면 이번도 건너뛰기 (whipsaw 73.8%)
 
-### n_up=2
-| 콤보 | 방향 | 실현WR | 스위트스팟 |
-|------|------|--------|-----------|
-| ✅ DDUU | LONG | 76.3% | MACD음수 + dur≥8 → 84.7% |
-| ✅ UUDD | SHORT | 74.2% | |
-| ✅ DUDU | LONG | — | 4h late + dur≥8 → 88.2% |
-| ❌ UDDU | 회피 | 52.6% | 코인 플립 |
-| ❌ DUUD | 회피 | 48.8% | 코인 플립 |
+### RULE 3: 고위험 구간 진입 금지
+Danger Score = 아래 6인자 합산 (0~13점):
+1. |ppo_hist| (analysis_snapshot): <20→+3, <40→+2, <60→+1
+2. |dist_MA25| = |price - ma_25| / ma_25 × 100: >3%→+3, >2%→+2, >1.5%→+1
+3. 4h position (timeframes["4h"].position_pct): >0.8→+2, >0.5→+1
+4. 위험 콤보 (UUUD/DDDU→+2, DUUD/UDDU→+1)
+5. 4h 미정렬 + 중반(0.3~0.7): →+1
 
-### n_up=1
-| 콤보 | 방향 | 실현WR | 스위트스팟 |
-|------|------|--------|-----------|
-| DDUD | SHORT | — | 4h late + dur≥8 → 91.8% |
-| UDDD | SHORT | ~75.7% | |
-| ⚠️ DDDU | 회피 | 롱WR 40.5% | 거래하지 않음 |
+- Danger ≥ 7 (RED) → **HOLD**
+- Danger 5~6 (ORANGE) → size_pct 50% 감소
 
-### n_up=0
-| 콤보 | 방향 | 실현WR | 비고 |
-|------|------|--------|------|
-| DDDD | SHORT | ~90% | 무조건 숏 |
+### RULE 4: 4h/1h 방향 미정렬 시 사이즈 감소
+- chain.alignment_4h_1h == False → size_pct 50% 감소
+- 4h 정렬 진입 승률 64% / 미정렬 15% (실전 데이터)
 
----
+### RULE 5: CVD 반대 시 진입 금지
+- market_state.timeframes["1h"].analysis_snapshot.cvd 확인
+- n_up=3 + CVD ≤ 0 → HOLD (WR 92.6%→60.6% 급락)
+- n_up=1 + CVD ≥ 0 → HOLD (WR 90.4%→42.3% 급락)
+- n_up=4/0: CVD 방향으로 사이즈 조정 가능 (CVD 상위50% → 수익 2배)
 
-## 3. 진입 조건 필터
+### RULE 6: 청산 후 쿨다운
+- 포지션 청산 직후 30분간 신규 진입 금지 (시스템 자동 적용)
+- Whipsaw 피해 방지 (-309 USDT, 31일간 실전 데이터)
 
-### MACD Zone
-- n_up=3 롱: 1h MACD 음수 = early entry (+1.89%, WR 89.7%)
-- n_up=1 숏: 1h MACD 양수 = early entry
-- n_up=4/0: MACD zone 무관
+### RULE 7: 일일 거래 한도
+- 시스템이 하루 3건 초과 시 자동 차단 (5건 이상 시 WR 39%)
 
-### Duration
-- dur ≤ 4 → **반드시 스킵** (확인비용 ~99%, 실현WR 47.5%)
-- dur 5~7 → 사이즈 축소 권장
-- dur ≥ 8 → 안정적
+### RULE 8: 연속 손실 후 중단
+- 3연패 후 당일 거래 중단 (시스템 자동 적용)
 
-### 4h Position (사이클 내 위치)
-- 4h early (0~20%) → 최강 수익
-- 4h late (pos>0.9) → 가장 강력한 단일 필터, 전환 임박
-
-### RSI 극단값 조합
-- DUUU + MACD음수 + RSI<35 → +5.33% (WR 100%)
-- DDDD + MACD양수 + RSI>65 → -5.83% (WR 100%)
-- UUUU + RSI>60 + dur≥12 → +7.96% (WR 100%)
-
-### 펀딩비 (보조)
-- FR 수준 자체 → 방향 예측력 0
-- FR 변동성 상위33% + n_up=4 → 사이징 참고
-- n_up=1 숏 + MACD+ + FR 급락(slope<-0.001) → WR 96%
+### RULE 9: 초중반 감속에서 조기 청산 금지
+- 사이클 position_pct ≤ 0.6 구간의 ppo_hist 감속: 100% 재가속
+- 5연속 감속도 92% 재가속 → **보유 유지**
+- 단, Δhist < -50 이면 재가속 확정이 아닌 가짜 바운스 → 즉시 청산
 
 ---
 
-## 4. 포지션 사이징 규칙
+## 3. 진입 의사결정 트리
 
-1. n_up=4/0 → 100% 기본사이즈
-2. n_up=3/1 + 4h 정렬 → 100%
-3. n_up=3/1 + 4h 미정렬 → 50%
-4. n_up=2 거래가능 콤보 → 50% 기본
-5. 스위트스팟 조건 충족 → 추가 사이즈업 가능
+```
+Step 1: n_up 확인
+  n_up=4 → ENTER_LONG (dur≥5이면 풀사이즈)
+  n_up=0 → ENTER_SHORT (dur≥5이면 풀사이즈)
+  n_up=3 → Step 2로
+  n_up=1 → Step 2로 (방향 반전: SHORT 기준으로 판단)
+  n_up=2 → Step 3으로
 
----
+Step 2: n_up=3(LONG) / n_up=1(SHORT) 조건부 진입
+  CVD 방향 불일치 → HOLD
+  4h position > 0.8 (말기) → 사이즈 50% 또는 HOLD
+  1h MACD음수(ppo<0) + n_up=3 → 최강 구간 (WR 89.7%)
+  1h MACD양수(ppo>0) + n_up=1 → 최강 구간 (SHORT 기준)
+  그 외 → 정상 진입 (RULE 3~4 적용 후 사이즈 결정)
 
-## 5. 청산 규칙
-
-1. 1h 사이클 전환 감지 → 청산 검토
-2. n_up 변경으로 방향 불일치 → 청산
-3. 능동 관리: 1h DOWN 시작 → 롱 청산, 1h UP 재시작 → 재진입
-
----
-
-## 6. 구조적 제약
-
-- 역추세 진입(1w/1d UP 내 숏) = 제한된 수익 기대
-- 확인 비용: 1h 전환 확인에 ~0.6% 소요
-- SHORT 확인비용 > LONG (BTC 상승 편향)
-- 4h 전환 근접 시 확인비용 29% 증가
+Step 3: n_up=2 트리플 필터 (모두 충족 시에만 진입)
+  LONG 조건: CVD > 0 AND dist_MA25 < 0 AND duration ≥ 8 → ENTER_LONG (WR 89.3%)
+  SHORT 조건: CVD < 0 AND dist_MA25 > 0 AND duration ≥ 8 → ENTER_SHORT (WR 84.0%)
+  미충족 → HOLD
+```
 
 ---
 
-## 7. 판단 원칙
+## 4. 포지션 사이징
 
-- 확실하지 않으면 HOLD. 기회는 다시 옴.
-- 실현 WR 기준 (이론 WR 아님).
-- 포지션 유지가 유리하면 HOLD (불필요한 전환 방지).
-- dur ≤ 4 → 무조건 HOLD.
+기본 원칙: **AI가 size_pct(0~100)를 반환하면 시스템이 레버리지 고려 후 실제 수량 계산.**
+
+| 조건 | size_pct 기준 |
+|:---|:---:|
+| n_up=4/0, 조건 양호 | 80~100 |
+| n_up=3/1, CVD 정렬, 위험 낮음 | 60~80 |
+| n_up=3/1, 위험 보통 | 40~60 |
+| n_up=2, 트리플 필터 통과 | 40~60 |
+| 4h 미정렬 | ×0.5 추가 적용 |
+| Danger ORANGE (5~6) | ×0.5 추가 적용 |
+
+---
+
+## 5. 청산 조건
+
+### 적극 청산 (즉시 CLOSE)
+1. **사이클 방향 전환**: 1h 사이클이 반대로 전환되고 n_up이 ≥2 변화 (캐스케이드 붕괴)
+   - DDUU → DDDD: 즉시 LONG 청산 (누적5 = -6.46%)
+   - UUDD → UUUU: 즉시 SHORT 청산 (누적5 = +6.13%)
+2. **Δhist < -50 (UP사이클)**: 가짜 반등 확정 → 즉시 청산
+
+### 보유 유지
+1. 사이클 position_pct ≤ 0.6 구간의 감속: 무시 (100% 재가속)
+2. 단순 n_up 1단계 변화 (예: 4→3): 포지션 재평가만, 즉시 청산 아님
+
+### 능동 관리 (선택적)
+- 1h DOWN 전환 시 일부 청산 → 1h UP 재전환 시 재진입 (+2pp 개선)
+
+---
+
+## 6. 진입 타이밍
+
+- **4h 사이클 초반(position_pct 0~0.2)**: 최강 수익 구간 (p<0.000001)
+- **1캔들 확인 즉시 진입**: 모든 n_up에서 기대값 최대 (2캔들 대기는 WR 하락)
+- n_up=4/0: 즉시 진입 WR 95~97%
+- n_up=3/1: 즉시 진입 WR 84~85%
+
+---
+
+## 7. 회피 콤보 목록 (n_up=2 이하에서도 진입 금지)
+
+| 콤보 | 방향 시도 | 실현 WR | 사유 |
+|:---:|:---:|:---:|:---|
+| UUUD | SHORT | 38.6% | 상위3 UP, 1h만 DOWN → 구조적 실패 |
+| DDDU | LONG | 40.5% | 상위3 DOWN, 1h만 UP → 구조적 실패 |
+| UDDU | LONG | 52.6% | 동전던지기 |
+| DUUD | SHORT | 48.8% | 동전던지기 |
+
+---
+
+## 8. JSON 응답 형식
+
+반드시 아래 형식으로만 응답:
+
+```json
+{
+  "action": "HOLD | ENTER_LONG | ENTER_SHORT | CLOSE_LONG | CLOSE_SHORT | REVERSE_TO_LONG | REVERSE_TO_SHORT",
+  "direction": "LONG | SHORT | NEUTRAL",
+  "size_pct": 0,
+  "confidence": 0.0,
+  "reasoning": "적용된 규칙과 핵심 지표 수치 명시",
+  "sl_pct": 2.0,
+  "tp_pct": 4.0,
+  "alerts": []
+}
+```
+
+**reasoning 필수 포함 항목:** n_up 값, combo, CVD 방향, ppo_hist 값, 4h position_pct, Danger Score 계산 근거, 적용된 RULE 번호.
+
+**HOLD 판단 시에도 reasoning 에 이유 명시.**
