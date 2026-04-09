@@ -37,19 +37,21 @@ class LiveUpdateService:
         futures_interval_seconds: int,
         cycle_interval_seconds: int,
         indicator_recalc_rows: int,
+        run_initial_sync: bool = False,
     ) -> None:
         self.market_interval_seconds = market_interval_seconds
         self.futures_interval_seconds = futures_interval_seconds
         self.cycle_interval_seconds = cycle_interval_seconds
         self.indicator_recalc_rows = indicator_recalc_rows
+        self.run_initial_sync = run_initial_sync
 
         self.collector = AdvancedBTCDataCollectorV2()
         self.indicator_calculator = IndicatorCalculator()
         PROJECT_PATHS.ensure_runtime_dirs()
 
         now = time.time()
-        self.next_market_sync_at = now
-        self.next_futures_sync_at = now
+        self.next_market_sync_at = now if run_initial_sync else now + market_interval_seconds
+        self.next_futures_sync_at = now if run_initial_sync else now + futures_interval_seconds
         self.next_cycle_sync_at = align_to_hour_boundary(now) + cycle_interval_seconds
 
     def run_forever(self) -> None:
@@ -57,6 +59,7 @@ class LiveUpdateService:
         LOGGER.info("Market sync every %ss", self.market_interval_seconds)
         LOGGER.info("Futures sync every %ss", self.futures_interval_seconds)
         LOGGER.info("Cycle sync every %ss", self.cycle_interval_seconds)
+        LOGGER.info("Initial sync enabled: %s", self.run_initial_sync)
 
         while True:
             now = time.time()
@@ -128,6 +131,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--futures-interval", type=int, default=60, help="Seconds between funding/OI merges.")
     parser.add_argument("--cycle-interval", type=int, default=3600, help="Seconds between cycle recalculations.")
     parser.add_argument("--indicator-recalc-rows", type=int, default=120, help="Trailing rows to recalculate indicators on each refresh.")
+    parser.add_argument("--run-initial-sync", action="store_true", help="Run data sync immediately on startup.")
     parser.add_argument("--log-level", default="INFO", help="Logging level.")
     return parser.parse_args()
 
@@ -144,6 +148,7 @@ def main() -> int:
         futures_interval_seconds=args.futures_interval,
         cycle_interval_seconds=args.cycle_interval,
         indicator_recalc_rows=args.indicator_recalc_rows,
+        run_initial_sync=args.run_initial_sync,
     )
     service.run_forever()
     return 0

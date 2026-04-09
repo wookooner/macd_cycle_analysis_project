@@ -23,7 +23,7 @@ LOGGER = logging.getLogger("integrated_api_server")
 router = APIRouter()
 
 
-def create_app(enable_live_update: bool = False) -> FastAPI:
+def create_app(enable_live_update: bool = False, live_update_initial_sync: bool = False) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if enable_live_update:
@@ -33,6 +33,7 @@ def create_app(enable_live_update: bool = False) -> FastAPI:
                 futures_interval_seconds=60,
                 cycle_interval_seconds=3600,
                 indicator_recalc_rows=120,
+                run_initial_sync=live_update_initial_sync,
             )
             thread = threading.Thread(target=service.run_forever, daemon=True, name="live-update-service")
             thread.start()
@@ -423,6 +424,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8000, help="Port to bind.")
     parser.add_argument("--log-level", default="info", help="Uvicorn log level.")
     parser.add_argument("--with-live-update", action="store_true", help="Start live update service in the same process.")
+    parser.add_argument(
+        "--live-update-initial-sync",
+        action="store_true",
+        help="Run live-update data sync immediately on API startup. Without this, the first sync waits for the interval.",
+    )
     return parser.parse_args()
 
 
@@ -433,7 +439,10 @@ def main() -> int:
     import uvicorn
 
     uvicorn.run(
-        create_app(enable_live_update=args.with_live_update),
+        create_app(
+            enable_live_update=args.with_live_update,
+            live_update_initial_sync=args.live_update_initial_sync,
+        ),
         host=args.host,
         port=args.port,
         log_level=args.log_level.lower(),

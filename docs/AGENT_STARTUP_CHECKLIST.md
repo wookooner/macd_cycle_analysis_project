@@ -103,6 +103,7 @@ C:\Users\qw370\macd-cycle-data
 - API and live-update flows are expected to use the external data root.
 - Repo-local `data/` is not the operating source of truth anymore.
 - Legacy compatibility exists only to help controlled migration, not as the preferred target for new work.
+- Active code must not import from `legacy/`.
 
 ## If Unsure
 
@@ -112,4 +113,5 @@ Stop and check these files in order:
 2. `src/common/paths.py`
 3. `docs/AGENT_TASK_RULES.md`
 4. `docs/NO_LEAKAGE_POLICY.md`
-5. `docs/WORKSPACE_SETUP.md`
+5. `docs/REPO_STRUCTURE.md`
+6. `docs/WORKSPACE_SETUP.md`

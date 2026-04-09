@@ -32,6 +32,7 @@ Start here after bootstrap:
 
 - `configs/paths.yaml`
 - `docs/AGENT_STARTUP_CHECKLIST.md`
+- `docs/REPO_STRUCTURE.md`
 - `docs/WORKSPACE_SETUP.md`
 - `docs/PROJECT_OVERVIEW.md`
 - `docs/AGENT_TASK_RULES.md`

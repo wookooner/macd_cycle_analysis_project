@@ -39,6 +39,7 @@ data/
 outputs/
 reports/
 logs/
+*.log
 analysis_results/
 pattern_discovery_results/
 feature_analysis_report/
