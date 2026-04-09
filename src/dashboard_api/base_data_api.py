@@ -3,9 +3,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.common.paths import PROJECT_PATHS
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-BASE_DATA_DIR = PROJECT_ROOT / "data" / "base_data"
+BASE_DATA_DIR = PROJECT_PATHS.base_data_dir
 
 router = APIRouter()
 

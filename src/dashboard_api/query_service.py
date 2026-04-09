@@ -5,16 +5,16 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
-from dashboard_query_engine import (
+from src.common.paths import PROJECT_PATHS
+from src.dashboard_api.query_engine import (
     DuckDBDashboardQueryEngine,
     PandasDashboardQueryEngine,
     get_configured_query_engine,
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DASHBOARD_DATA_DIR = PROJECT_ROOT / "data" / "dashboard_data"
-DASHBOARD_META_DIR = PROJECT_ROOT / "data" / "dashboard_meta"
+DASHBOARD_DATA_DIR = PROJECT_PATHS.dashboard_root / "candles"
+DASHBOARD_META_DIR = PROJECT_PATHS.dashboard_root / "meta"
 MAX_PREVIEW_ROWS = 200
 TIMEFRAME_ORDER = ("1m", "1h", "4h", "1d", "1w")
 SCATTER_DOWNSAMPLE_THRESHOLD = 2400

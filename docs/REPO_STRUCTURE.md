@@ -26,6 +26,8 @@ macd_cycle_analysis_project/
 ## Active Code
 
 - `src/common/`: shared path and common utilities
+- `src/dashboard_api/`: integrated API server, dashboard routes, and query engine
+- `src/services/`: runtime services such as live update
 - `data_pipeline/`: collectors, indicators, cycle detection, feature extractors, and pipeline runner
 - `trading_bot/`: live trading and execution workflow
 - `dashboards/chart_app/`: chart dashboard frontend

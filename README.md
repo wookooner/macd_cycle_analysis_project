@@ -28,6 +28,8 @@ Run the integrated API server:
 python .\api_server.py --with-live-update
 ```
 
+The root `api_server.py` is a compatibility entrypoint. The implementation lives in `src/dashboard_api/`.
+
 Start here after bootstrap:
 
 - `configs/paths.yaml`

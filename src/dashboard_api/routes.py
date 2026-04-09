@@ -4,7 +4,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-import dashboard_query_service as query_service
+from src.dashboard_api import query_service
 
 
 router = APIRouter()
