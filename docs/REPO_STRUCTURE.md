@@ -30,7 +30,7 @@ macd_cycle_analysis_project/
 - `src/services/`: runtime services such as live update
 - `data_pipeline/`: collectors, indicators, cycle detection, feature extractors, and pipeline runner
 - `trading_bot/`: live trading and execution workflow
-- `dashboards/chart_app/`: chart dashboard frontend
+- `dashboards/chart_app/`: real-time exchange-style chart dashboard frontend; polls API series data every 15 seconds
 - `dashboards/stats_app/`: stats dashboard frontend
 - `scripts/`: runnable utilities, migration, validation, dashboard, analysis, and dev tools
 - `docs/`: project rules and operating documentation
@@ -62,3 +62,11 @@ C:\Users\qw370\macd-cycle-data
 ```
 
 New code must use `src/common/paths.py` instead of hardcoded `data/`, `outputs/`, or `reports/` paths.
+
+For a one-page agent overview, see `docs/AGENT_PROJECT_CONTEXT.md`.
+
+For data-file composition, schema inspection, and runtime data connections, see `docs/DATA_LAYOUT.md` and run:
+
+```powershell
+python .\scripts\dev\data_structure_inspector.py
+```

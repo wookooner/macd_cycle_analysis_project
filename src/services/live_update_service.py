@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from data_pipeline.collectors.config import DATA_FILES, RAW_DATA_DIR
+from data_pipeline.collectors.config import DATA_FILES, RAW_DATA_DIR, resolve_market_file_path
 from data_pipeline.collectors.new_collcetor import AdvancedBTCDataCollectorV2
 from data_pipeline.indicators.indicator import IndicatorCalculator
 from data_pipeline.pipeline_runner import _merge_futures_into_ohlcv, run_pipeline
@@ -14,8 +14,19 @@ from src.common.paths import PROJECT_PATHS
 
 LOGGER = logging.getLogger("live_update_service")
 PROJECT_ROOT = Path(__file__).resolve().parent
-TIMEFRAMES = ["1h", "4h", "1d", "1w"]
+TIMEFRAMES = ["1min", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"]
 FUTURES_TIMEFRAMES = ["1h", "4h", "1d"]
+TIMEFRAME_CVD_ROLLING = {
+    "1min": 120,
+    "5m": 60,
+    "15m": 60,
+    "30m": 60,
+    "1h": 480,
+    "4h": 120,
+    "1d": 20,
+    "1w": 20,
+    "1M": 20,
+}
 
 
 def setup_logging(log_level: str) -> None:
@@ -100,7 +111,7 @@ class LiveUpdateService:
                 self.update_indicators_for_timeframe(timeframe)
 
     def update_indicators_for_timeframe(self, timeframe: str) -> None:
-        file_path = RAW_DATA_DIR / DATA_FILES[timeframe]
+        file_path = resolve_market_file_path(timeframe)
         if not file_path.exists():
             LOGGER.warning("Missing CSV file for indicator update: %s", file_path.name)
             return
@@ -110,7 +121,7 @@ class LiveUpdateService:
             file_path,
             force_recalculate=False,
             recalc_last_n=self.indicator_recalc_rows,
-            cvd_rolling_period=20,
+            cvd_rolling_period=TIMEFRAME_CVD_ROLLING.get(timeframe, 20),
         )
 
     def sync_cycles(self) -> None:

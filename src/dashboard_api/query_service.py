@@ -16,7 +16,7 @@ from src.dashboard_api.query_engine import (
 DASHBOARD_DATA_DIR = PROJECT_PATHS.dashboard_root / "candles"
 DASHBOARD_META_DIR = PROJECT_PATHS.dashboard_root / "meta"
 MAX_PREVIEW_ROWS = 200
-TIMEFRAME_ORDER = ("1m", "1h", "4h", "1d", "1w")
+TIMEFRAME_ORDER = ("1min", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M")
 SCATTER_DOWNSAMPLE_THRESHOLD = 2400
 SCATTER_GRID_X = 120
 SCATTER_GRID_Y = 72
@@ -71,7 +71,7 @@ def _parent_timeframes(timeframe: str) -> list[str]:
     if timeframe not in TIMEFRAME_ORDER:
         return []
     idx = TIMEFRAME_ORDER.index(timeframe)
-    return [tf for tf in TIMEFRAME_ORDER[idx + 1 :] if tf in {"1h", "4h", "1d", "1w"}]
+    return [tf for tf in TIMEFRAME_ORDER[idx + 1 :] if tf in {"5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"}]
 
 
 def _relation_prefix(parent_timeframe: str) -> str:

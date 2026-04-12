@@ -59,7 +59,7 @@ class SimpleMACDAlgorithm:
         # 3단계: 원래 방향성 그대로 분류
         classification = pd.Series(directions, index=original_index)
         
-        print(f"✅ 감지된 사이클: {len(cycles)}개")
+        print(f"[detect] cycles found: {len(cycles)}")
         #print(f"✅ 방향성 보존 분류 완료")
         
         return cycles, classification

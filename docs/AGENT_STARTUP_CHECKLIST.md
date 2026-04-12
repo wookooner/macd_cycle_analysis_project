@@ -38,6 +38,12 @@ $env:PYTHONPATH='.'
 python .\scripts\validate_paths.py
 ```
 
+Inspect data-file composition if the task touches data schemas, CSV/parquet columns, cycle payloads, or dashboard payloads:
+
+```powershell
+python .\scripts\dev\data_structure_inspector.py
+```
+
 Preview migration status if the task touches legacy outputs or data movement:
 
 ```powershell
@@ -101,6 +107,9 @@ C:\Users\qw370\macd-cycle-data
 ## Current Runtime Truth
 
 - API and live-update flows are expected to use the external data root.
+- API server startup without flags is read-only, but the real-time chart workflow intentionally uses `python .\api_server.py --with-live-update`.
+- The real-time chart dashboard is `dashboards/chart_app/`; it polls `/api/base-data/series` every 15 seconds and expects `--with-live-update` when live data is needed.
+- `--with-live-update` defaults to 15-second market sync, 60-second futures sync, and 3600-second cycle sync.
 - Repo-local `data/` is not the operating source of truth anymore.
 - Legacy compatibility exists only to help controlled migration, not as the preferred target for new work.
 - Active code must not import from `legacy/`.
@@ -113,5 +122,7 @@ Stop and check these files in order:
 2. `src/common/paths.py`
 3. `docs/AGENT_TASK_RULES.md`
 4. `docs/NO_LEAKAGE_POLICY.md`
-5. `docs/REPO_STRUCTURE.md`
-6. `docs/WORKSPACE_SETUP.md`
+5. `docs/AGENT_PROJECT_CONTEXT.md`
+6. `docs/REPO_STRUCTURE.md`
+7. `docs/DATA_LAYOUT.md`
+8. `docs/WORKSPACE_SETUP.md`

@@ -22,7 +22,13 @@ LOGGER = logging.getLogger("integrated_api_server")
 router = APIRouter()
 
 
-def create_app(enable_live_update: bool = False, live_update_initial_sync: bool = False) -> FastAPI:
+def create_app(
+    enable_live_update: bool = False,
+    live_update_initial_sync: bool = False,
+    live_update_market_interval_seconds: int = 15,
+    live_update_futures_interval_seconds: int = 60,
+    live_update_cycle_interval_seconds: int = 3600,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if enable_live_update:
@@ -30,9 +36,9 @@ def create_app(enable_live_update: bool = False, live_update_initial_sync: bool 
 
             LOGGER.info("Starting live update service in background thread")
             service = LiveUpdateService(
-                market_interval_seconds=15,
-                futures_interval_seconds=60,
-                cycle_interval_seconds=3600,
+                market_interval_seconds=live_update_market_interval_seconds,
+                futures_interval_seconds=live_update_futures_interval_seconds,
+                cycle_interval_seconds=live_update_cycle_interval_seconds,
                 indicator_recalc_rows=120,
                 run_initial_sync=live_update_initial_sync,
             )
@@ -424,12 +430,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind.")
     parser.add_argument("--log-level", default="info", help="Uvicorn log level.")
-    parser.add_argument("--with-live-update", action="store_true", help="Start live update service in the same process.")
+    parser.add_argument(
+        "--with-live-update",
+        action="store_true",
+        help="Start live update service in the same process for the real-time chart dashboard.",
+    )
     parser.add_argument(
         "--live-update-initial-sync",
         action="store_true",
         help="Run live-update data sync immediately on API startup. Without this, the first sync waits for the interval.",
     )
+    parser.add_argument("--live-update-market-interval", type=int, default=15, help="Seconds between market syncs when --with-live-update is enabled.")
+    parser.add_argument("--live-update-futures-interval", type=int, default=60, help="Seconds between futures syncs when --with-live-update is enabled.")
+    parser.add_argument("--live-update-cycle-interval", type=int, default=3600, help="Seconds between cycle syncs when --with-live-update is enabled.")
     return parser.parse_args()
 
 
@@ -445,6 +458,9 @@ def main() -> int:
         create_app(
             enable_live_update=args.with_live_update,
             live_update_initial_sync=args.live_update_initial_sync,
+            live_update_market_interval_seconds=args.live_update_market_interval,
+            live_update_futures_interval_seconds=args.live_update_futures_interval,
+            live_update_cycle_interval_seconds=args.live_update_cycle_interval,
         ),
         host=args.host,
         port=args.port,

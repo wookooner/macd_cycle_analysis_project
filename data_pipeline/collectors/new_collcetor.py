@@ -13,7 +13,9 @@ from datetime import datetime, timezone
 import time
 from pathlib import Path
 import logging
+import os
 import shutil
+import uuid
 
 # Binance 공식 커넥터: 현물(Spot)과 무기한 선물(UM Futures) 분리
 from binance.spot import Spot as SpotClient
@@ -660,11 +662,116 @@ class AdvancedBTCDataCollectorV2:
             self.logger.warning(f"기존 파일 로드 실패 ({file_path.name}): {e}")
             return pd.DataFrame()
 
+    def _normalize_external_market_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
+        rename_map = {
+            "timestamp": "open_time",
+            "quote_asset_volume": "Volume USD",
+            "taker_buy_base_asset_volume": "taker_buy_base",
+        }
+        df = chunk.rename(columns=rename_map).copy()
+
+        numeric_cols = [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "Volume USD",
+            "taker_buy_base",
+        ]
+        for col in numeric_cols:
+            if col not in df.columns:
+                df[col] = pd.NA
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df["open_time"] = pd.to_numeric(df.get("open_time"), errors="coerce")
+        df = df.dropna(subset=["open_time"]).copy()
+
+        df["unix"] = (df["open_time"] // 1000).astype("int64")
+        df["date"] = pd.to_datetime(df["unix"], unit="s", utc=True).dt.strftime("%Y-%m-%d %H:%M:%S")
+        df["symbol"] = "BTCUSD"
+        df["volume_delta"] = (2 * df["taker_buy_base"] - df["volume"]).round(2)
+
+        for col in ["open", "high", "low", "close"]:
+            df[col] = df[col].round(2)
+        for col in ["Volume USD", "volume", "taker_buy_base"]:
+            df[col] = df[col].round(2)
+
+        for col in PIPELINE_MARKET_COLUMNS:
+            if col not in df.columns:
+                df[col] = pd.NA
+
+        normalized = df[PIPELINE_MARKET_COLUMNS].copy()
+        return normalized.sort_values("unix").drop_duplicates(subset=["unix"], keep="last")
+
+    def _backup_if_exists(self, file_path: Path) -> None:
+        if not file_path.exists():
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = BACKUP_DATA_DIR / f"{file_path.name}.backup_{ts}"
+        try:
+            shutil.copy2(file_path, backup_path)
+            prune_backup_files(BACKUP_DATA_DIR, keep_oldest=0, keep_newest=BACKUP_KEEP_RECENT)
+            self.logger.info(f"백업: {backup_path.name}")
+        except Exception as e:
+            self.logger.error(f"백업 실패: {e}")
+
+    def sync_intraday_market_file(self, timeframe: str) -> None:
+        if timeframe not in INTRADAY_SOURCE_FILES:
+            self.logger.error(f"지원하지 않는 intraday timeframe: {timeframe}")
+            return
+
+        source_path = RAW_DATA_DIR / INTRADAY_SOURCE_FILES[timeframe]
+        output_path = RAW_DATA_DIR / DATA_FILES[timeframe]
+
+        if not source_path.exists():
+            self.logger.warning(f"Intraday source file not found: {source_path}")
+            return
+
+        self.logger.info(f"===== Intraday market sync {timeframe} =====")
+        temp_path = output_path.with_name(f"{output_path.name}.{uuid.uuid4().hex}.tmp")
+        wrote_any = False
+        wrote_rows = 0
+
+        try:
+            for chunk in pd.read_csv(source_path, chunksize=200_000):
+                normalized = self._normalize_external_market_chunk(chunk)
+                if normalized.empty:
+                    continue
+                normalized.to_csv(temp_path, mode="a", index=False, header=not wrote_any)
+                wrote_rows += len(normalized)
+                wrote_any = True
+
+            if not wrote_any:
+                self.logger.warning(f"No usable rows found in {source_path.name}")
+                if temp_path.exists():
+                    temp_path.unlink()
+                return
+
+            self._backup_if_exists(output_path)
+            os.replace(temp_path, output_path)
+            self.logger.info(f"정규화 완료: {output_path.name} ({wrote_rows} rows)")
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            self.logger.error(f"Intraday sync failed for {timeframe}: {e}")
+
+    def sync_intraday_market_files(self) -> None:
+        total = len(INTRADAY_SOURCE_FILES)
+        for index, timeframe in enumerate(INTRADAY_SOURCE_FILES.keys(), start=1):
+            self.logger.info("[intraday sync %s/%s - %.1f%%] %s", index, total, index / total * 100, timeframe)
+            self.sync_intraday_market_file(timeframe)
+
     # ─── 업데이트 메서드 (퍼블릭 인터페이스) ─────────────────────────────────
 
     def update_ohlcv(self, timeframe: str):
         """OHLCV + taker_buy_base + volume_delta 업데이트"""
         self.logger.info(f"===== OHLCV {timeframe} 업데이트 =====")
+        if timeframe in INTRADAY_SOURCE_FILES:
+            self.sync_intraday_market_file(timeframe)
+            return
+
         file_path   = RAW_DATA_DIR / DATA_FILES[timeframe]
         existing_df = self._load_existing(file_path)
 
@@ -801,6 +908,7 @@ class AdvancedBTCDataCollectorV2:
         self.logger.info("🚀 전체 OHLCV 업데이트 시작")
         for tf in DATA_FILES.keys():
             self.update_ohlcv(tf)
+        self.sync_intraday_market_files()
         self.logger.info("🎉 전체 OHLCV 업데이트 완료")
 
     def update_all_futures_data(self):

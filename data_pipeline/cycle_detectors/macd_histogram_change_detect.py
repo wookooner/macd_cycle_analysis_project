@@ -74,11 +74,15 @@ def find_timeframe_files():
 
     timeframe_files = {}
     patterns = {
+        "1min": ["*1min*", "*_1min.*", "*1minute*", "*_1minute.*", "*BTCUSD_1m.csv", "*1m_intraday*"],
+        "5m": ["*5m*", "*_5m.*", "*5minute*", "*_5minutes.*"],
+        "15m": ["*15m*", "*_15m.*", "*15minute*", "*_15minutes.*"],
+        "30m": ["*30m*", "*_30m.*", "*30minute*", "*_30minutes.*"],
         "1h": ["*1h*", "*_1h.*", "*1hour*"],
         "4h": ["*4h*", "*_4h.*", "*4hour*"],
         "1d": ["*1d*", "*_1d.*", "*1day*", "*daily*"],
         "1w": ["*1w*", "*_1w.*", "*1week*", "*weekly*"],
-        "1m": ["*1m*", "*_1m.*", "*1month*", "*monthly*"],
+        "1M": ["*1M*", "*_1M.*", "*1month*", "*monthly*"],
     }
 
     for timeframe, pattern_list in patterns.items():

@@ -24,6 +24,10 @@ LOGGER = logging.getLogger("pipeline")
 
 
 def _setup_logging() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -61,17 +65,31 @@ def _asset_specs() -> dict[str, AssetSpec]:
             asset="btc",
             label="BTC (Binance)",
             data_files={
+                "1min": "BTCUSD_1min.csv",
+                "5m": "BTCUSD_5m.csv",
+                "15m": "BTCUSD_15m.csv",
+                "30m": "BTCUSD_30m.csv",
                 "1h": "BTCUSD_1h.csv",
                 "4h": "BTCUSD_4h.csv",
                 "1d": "BTCUSD_1d.csv",
                 "1w": "BTCUSD_1w.csv",
-                "1m": "BTCUSD_1m.csv",
+                "1M": "BTCUSD_1M.csv",
             },
             cycle_dir=PROJECT_PATHS.asset_cycle_dir("btc"),
             legacy_cycle_dir=PROJECT_PATHS.cycle_structured_dir,
             funding_rate_file="BTCUSDT_funding_rate.csv",
             has_cvd=True,
-            cvd_rolling={"1h": 480, "4h": 120, "1d": 20, "1w": 20, "1m": 20},
+            cvd_rolling={
+                "1min": 120,
+                "5m": 60,
+                "15m": 60,
+                "30m": 60,
+                "1h": 480,
+                "4h": 120,
+                "1d": 20,
+                "1w": 20,
+                "1M": 20,
+            },
         ),
         "gold": AssetSpec(
             asset="gold",
@@ -115,6 +133,20 @@ def summarize_pipeline_outputs(asset: str) -> dict[str, str]:
     if spec.legacy_cycle_dir is not None:
         outputs["legacy_cycle_dir"] = str(spec.legacy_cycle_dir)
     return outputs
+
+
+def _resolve_market_input_path(timeframe: str, filename: str) -> Path:
+    from data_pipeline.collectors.config import LEGACY_DATA_FILE_ALIASES
+
+    preferred = PROJECT_PATHS.base_data_dir / filename
+    if preferred.exists():
+        return preferred
+    legacy_name = LEGACY_DATA_FILE_ALIASES.get(timeframe)
+    if legacy_name:
+        legacy = PROJECT_PATHS.base_data_dir / legacy_name
+        if legacy.exists():
+            return legacy
+    return preferred
 
 
 def step_collect(asset: str, collect_futures: bool = True, dry_run: bool = False) -> bool:
@@ -170,13 +202,17 @@ def step_indicator(asset: str, force: bool = False, dry_run: bool = False) -> bo
     calculator = IndicatorCalculator()
 
     for timeframe, filename in spec.data_files.items():
-        file_path = PROJECT_PATHS.base_data_dir / filename
+        progress = (success_count + fail_count + 1) / max(len(spec.data_files), 1) * 100
+        file_path = _resolve_market_input_path(timeframe, filename)
         if not file_path.exists():
             LOGGER.warning("Missing input file: %s", file_path)
             continue
 
         LOGGER.info(
-            "Indicator input: %s (cvd_rolling=%s, has_cvd=%s)",
+            "Indicator input [%s/%s %.1f%%]: %s (cvd_rolling=%s, has_cvd=%s)",
+            success_count + fail_count + 1,
+            len(spec.data_files),
+            progress,
             file_path.name,
             spec.cvd_rolling.get(timeframe, 20),
             spec.has_cvd,
@@ -248,7 +284,7 @@ def step_detect(asset: str, dry_run: bool = False) -> bool:
 
     timeframe_files: dict[str, Path] = {}
     for timeframe, filename in spec.data_files.items():
-        candidate = PROJECT_PATHS.base_data_dir / filename
+        candidate = _resolve_market_input_path(timeframe, filename)
         if candidate.exists():
             timeframe_files[timeframe] = candidate
         else:
@@ -259,7 +295,9 @@ def step_detect(asset: str, dry_run: bool = False) -> bool:
         return False
 
     results: dict[str, int] = {}
-    for timeframe, file_path in timeframe_files.items():
+    total_timeframes = len(timeframe_files)
+    for index, (timeframe, file_path) in enumerate(timeframe_files.items(), start=1):
+        LOGGER.info("Cycle detect progress [%s/%s %.1f%%]: %s", index, total_timeframes, index / total_timeframes * 100, timeframe)
         if dry_run:
             LOGGER.info("Dry run: would detect cycles for %s from %s", timeframe, file_path.name)
             results[timeframe] = 0
