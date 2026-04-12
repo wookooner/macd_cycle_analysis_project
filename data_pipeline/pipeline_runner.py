@@ -485,8 +485,31 @@ def _merge_futures_into_ohlcv(data_dir: Path, timeframe: str, ohlcv_filename: st
         return False
 
 
-ALL_STEPS = [1, 2, 3, 4]
-STEP_NAMES = {1: "collect", 2: "indicator", 3: "detect", 4: "map"}
+ALL_STEPS = [1, 2, 3, 4, 5]
+STEP_NAMES = {1: "collect", 2: "indicator", 3: "detect", 4: "map", 5: "context"}
+
+
+def step_context(asset: str, dry_run: bool = False) -> bool:
+    spec = _asset_specs()[asset]
+    _section(f"Step 5 / 5 : context - {spec.label}")
+    started_at = time.time()
+
+    from data_pipeline.context.context_builder import CycleContextBuilder
+
+    builder = CycleContextBuilder(
+        asset_cycle_dir=spec.cycle_dir,
+        context_dir=PROJECT_PATHS.context_dir(asset),
+        raw_market_dir=PROJECT_PATHS.base_data_dir,
+        asset=asset,
+    )
+
+    if dry_run:
+        LOGGER.info("Dry run: would build context in %s", builder.context_dir)
+        return True
+
+    ok = builder.run_all()
+    LOGGER.info("Step 5 complete (%s)", _elapsed(started_at))
+    return ok
 
 
 def run_pipeline(
@@ -516,6 +539,7 @@ def run_pipeline(
         2: lambda: step_indicator(asset, force=force, dry_run=dry_run),
         3: lambda: step_detect(asset, dry_run=dry_run),
         4: lambda: step_map(asset, dry_run=dry_run),
+        5: lambda: step_context(asset, dry_run=dry_run),
     }
 
     results: dict[int, bool] = {}
@@ -544,7 +568,7 @@ def run_pipeline(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MACD cycle data pipeline.")
     parser.add_argument("--asset", choices=["btc", "gold", "all"], default="btc")
-    parser.add_argument("--steps", nargs="+", type=int, default=ALL_STEPS, choices=ALL_STEPS)
+    parser.add_argument("--steps", nargs="+", type=int, default=[1, 2, 3, 4], choices=ALL_STEPS)
     parser.add_argument("--force", action="store_true", help="Recalculate indicators from scratch.")
     parser.add_argument("--no-futures", dest="no_futures", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Log planned work without writing outputs.")

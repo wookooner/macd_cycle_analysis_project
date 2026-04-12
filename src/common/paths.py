@@ -89,6 +89,9 @@ class ProjectPaths:
     def asset_cycle_dir(self, asset: str) -> Path:
         return self.cycle_structured_dir / asset
 
+    def context_dir(self, asset: str) -> Path:
+        return self.processed_root / "context" / asset
+
     def ensure_runtime_dirs(self) -> None:
         for directory in [
             self.data_root,
