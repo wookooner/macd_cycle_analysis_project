@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 import time
 import traceback
 from datetime import datetime, timezone
@@ -41,6 +40,20 @@ _RAW_CSV_NAMES: dict[str, str] = {
     "15m": "BTCUSD_15m.csv",
     "5m": "BTCUSD_5m.csv",
     "1min": "BTCUSD_1min.csv",
+}
+
+# Candle duration in nanoseconds — end_date stores start of last candle,
+# so effective cycle end = end_date + candle_duration_ns
+_CANDLE_NS: dict[str, int] = {
+    "1M": 30 * 24 * 3600 * 10**9,
+    "1w":  7 * 24 * 3600 * 10**9,
+    "1d":      24 * 3600 * 10**9,
+    "4h":       4 * 3600 * 10**9,
+    "1h":           3600 * 10**9,
+    "30m":        30 * 60 * 10**9,
+    "15m":        15 * 60 * 10**9,
+    "5m":          5 * 60 * 10**9,
+    "1min":        1 * 60 * 10**9,
 }
 
 _TF_PARENT: dict[str, str | None] = {
@@ -388,7 +401,8 @@ class CycleContextBuilder:
             if parent_tf is not None:
                 parent_dim = dim[dim["timeframe"] == parent_tf].sort_values("start_date").reset_index(drop=True)
                 p_starts = _to_ns_int64(parent_dim["start_date"])
-                p_ends = _to_ns_int64(parent_dim["end_date"])
+                # extend parent end by one candle duration (end_date = start of last candle)
+                p_ends = _to_ns_int64(parent_dim["end_date"]) + _CANDLE_NS.get(parent_tf, 0)
                 p_keys = parent_dim["cycle_key"].values.astype("int32")
                 p_types = parent_dim["cycle_type"].values.astype("int8")
 
@@ -518,34 +532,36 @@ class CycleContextBuilder:
 
             # --- major shortcut (minor TFs only) ---
             if tf in TF_MINOR:
-                ctx_indexed = ctx_1min.set_index("timestamp")
-                child_starts_ts = df["start_date"].dt.floor("min")
+                _ctx_lookup = ctx_1min[["timestamp", "1h_key", "1h_type", "4h_key", "4h_type"]].copy()
+                _ctx_lookup["timestamp"] = _ctx_lookup["timestamp"].astype("datetime64[s]")
+                _ctx_lookup = _ctx_lookup.sort_values("timestamp").reset_index(drop=True)
+                _child_ts = df["start_date"].dt.floor("min").rename("timestamp").to_frame()
+                _child_ts["timestamp"] = _child_ts["timestamp"].astype("datetime64[s]")
+                _child_ts["_row_idx"] = np.arange(len(df))
+                _child_ts = _child_ts.sort_values("timestamp").reset_index(drop=True)
+                _merged = pd.merge_asof(_child_ts, _ctx_lookup, on="timestamp", direction="nearest")
+                _merged = _merged.sort_values("_row_idx").reset_index(drop=True)
                 for major_tf in ["1h", "4h"]:
-                    keys_at_start = child_starts_ts.map(
-                        lambda ts, col=f"{major_tf}_key": ctx_indexed[col].get(ts, pd.NA)
-                    )
-                    types_at_start = child_starts_ts.map(
-                        lambda ts, col=f"{major_tf}_type": ctx_indexed[col].get(ts, pd.NA)
-                    )
-                    df[f"major_{major_tf}_key"] = keys_at_start.astype("Int32")
-                    df[f"major_{major_tf}_type"] = types_at_start.astype("Int8")
+                    df[f"major_{major_tf}_key"] = _merged[f"{major_tf}_key"].astype("Int32")
+                    df[f"major_{major_tf}_type"] = _merged[f"{major_tf}_type"].astype("Int8")
 
             # --- chain info (major TFs only) ---
             if tf in TF_MAJOR:
-                ctx_indexed = ctx_1min.set_index("timestamp")
-                child_starts_ts = df["start_date"].dt.floor("min")
-                df["n_up_4"] = child_starts_ts.map(
-                    lambda ts: ctx_indexed["n_up_4"].get(ts, pd.NA)
-                ).astype("Int8")
-                df["combo_4"] = child_starts_ts.map(
-                    lambda ts: ctx_indexed["combo_4"].get(ts, "")
-                ).astype(str)
+                _ctx_lookup = ctx_1min[["timestamp", "n_up_4", "combo_4"]].copy()
+                _ctx_lookup["timestamp"] = _ctx_lookup["timestamp"].astype("datetime64[s]")
+                _ctx_lookup = _ctx_lookup.sort_values("timestamp").reset_index(drop=True)
+                _child_ts = df["start_date"].dt.floor("min").rename("timestamp").to_frame()
+                _child_ts["timestamp"] = _child_ts["timestamp"].astype("datetime64[s]")
+                _child_ts["_row_idx"] = np.arange(len(df))
+                _child_ts = _child_ts.sort_values("timestamp").reset_index(drop=True)
+                _merged = pd.merge_asof(_child_ts, _ctx_lookup, on="timestamp", direction="nearest")
+                _merged = _merged.sort_values("_row_idx").reset_index(drop=True)
+                df["n_up_4"] = _merged["n_up_4"].astype("Int8")
+                df["combo_4"] = _merged["combo_4"].astype(str)
 
-            # --- backup + save (only if no backup exists yet for this file) ---
-            backups = list(path.parent.glob(f"{path.stem}.backup_*.parquet"))
-            if not backups:
-                backup = path.with_suffix(f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet")
-                shutil.copy2(path, backup)
+            # --- save enriched parquet ---
+            # No local backup needed: Step 3 (detect) always regenerates the
+            # pre-enrichment base file, and archive/ holds historical snapshots.
             df.to_parquet(path, index=False)
             LOGGER.info("  [pass1 saved] %s (%d cols)", tf, len(df.columns))
 
@@ -674,7 +690,13 @@ class CycleContextBuilder:
                 continue
             parent_dim = dim[dim["timeframe"] == parent_tf].set_index("cycle_key")[["start_date", "end_date"]]
             merged = normal.join(parent_dim.rename(columns={"start_date": "p_start", "end_date": "p_end"}), on="parent_key")
-            violations = int(((merged["start_date"] < merged["p_start"]) | (merged["end_date"] > merged["p_end"])).sum())
+            # p_end is start of last parent candle; effective end = p_end + parent_candle_dur
+            parent_candle_ns = pd.Timedelta(nanoseconds=_CANDLE_NS.get(parent_tf, 0))
+            p_end_eff = merged["p_end"] + parent_candle_ns
+            # child effective end = child end_date + child candle_dur
+            child_candle_ns = pd.Timedelta(nanoseconds=_CANDLE_NS.get(tf, 0))
+            c_end_eff = merged["end_date"] + child_candle_ns
+            violations = int(((merged["start_date"] < merged["p_start"]) | (c_end_eff > p_end_eff)).sum())
             if violations == 0:
                 report["passed"].append(f"parent_range_{tf}")
             else:

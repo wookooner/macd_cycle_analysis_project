@@ -6,6 +6,7 @@ import csv
 import json
 import sys
 from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +154,21 @@ def _classify_market_file(path: Path) -> dict[str, str]:
     return {"asset": "unknown", "dataset_type": "unknown", "timeframe": stem}
 
 
+def _arrow_type_str(t: Any) -> str:
+    """Return a compact string for an Arrow type, expanding struct/list one level."""
+    import pyarrow as pa
+    if pa.types.is_struct(t):
+        fields = ", ".join(f.name for f in t)
+        return f"struct<{fields}>"
+    if pa.types.is_list(t) or pa.types.is_large_list(t):
+        vt = t.value_type
+        if pa.types.is_struct(vt):
+            fields = ", ".join(f.name for f in vt)
+            return f"list<struct<{fields}>>"
+        return f"list<{vt}>"
+    return str(t)
+
+
 def _parquet_schema_summary(path: Path) -> dict[str, Any]:
     if pq is None:
         df = pd.read_parquet(path).head(1)
@@ -161,13 +177,15 @@ def _parquet_schema_summary(path: Path) -> dict[str, Any]:
             "row_count": None,
             "columns": columns,
             "dtypes": {column: str(dtype) for column, dtype in df.dtypes.items()},
-            "duplicate_columns": [name for name, count in Counter(columns).items() if count > 1],
+            "duplicate_columns": [],
         }
 
     pf = pq.ParquetFile(path)
-    schema = pf.schema
-    columns = schema.names
-    dtypes = {name: str(schema.column(i).physical_type) for i, name in enumerate(columns)}
+    # Use Arrow schema so nested structs/lists appear as single logical columns,
+    # not as flattened physical leaf paths (which caused false duplicate warnings).
+    arrow_schema = pf.schema_arrow
+    columns = arrow_schema.names
+    dtypes = {field.name: _arrow_type_str(field.type) for field in arrow_schema}
     return {
         "row_count": pf.metadata.num_rows,
         "columns": columns,
@@ -260,78 +278,108 @@ def _read_parquet_sample(path: Path, columns: list[str]) -> pd.DataFrame:
     return pd.read_parquet(path, columns=columns).head(1)
 
 
+def _process_market_file(path: Path) -> tuple[str, dict[str, Any]]:
+    """Read one CSV market file; returns (bucket, record). Used for parallel execution."""
+    info = _classify_market_file(path)
+    columns, first_row = _read_csv_header_and_first_row(path)
+    last_row = _read_last_csv_row(path, columns=columns)
+    record = {
+        "path": _safe_rel(path),
+        "asset": info["asset"],
+        "timeframe": info["timeframe"],
+        "columns": columns,
+        "column_count": len(columns),
+        "inferred_dtypes": {col: _infer_text_value_type(first_row.get(col, "") if first_row else "") for col in columns},
+        "time_fields": {
+            "first": _extract_time_candidates(first_row),
+            "last": _extract_time_candidates(last_row),
+        },
+        "has_core_price_columns": sorted(CORE_PRICE_COLUMNS.intersection(columns)),
+        "indicator_columns": _detect_indicator_columns(columns),
+    }
+    bucket = "price_files" if info["dataset_type"] == "price" else "auxiliary_files"
+    return bucket, record
+
+
 def summarize_raw_market() -> dict[str, Any]:
     root = PROJECT_PATHS.raw_market_dir
     files = [path for path in sorted(root.glob("*.csv")) if not _looks_temporary(path)]
-    summary: dict[str, Any] = {
+    price_files: list[dict[str, Any]] = []
+    auxiliary_files: list[dict[str, Any]] = []
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_process_market_file, path): path for path in files}
+        for fut in as_completed(futures):
+            try:
+                bucket, record = fut.result()
+                (price_files if bucket == "price_files" else auxiliary_files).append(record)
+            except Exception:
+                pass
+
+    # sort by timeframe order for consistent output
+    tf_rank = {tf: i for i, tf in enumerate(TIMEFRAME_ORDER)}
+    price_files.sort(key=lambda r: tf_rank.get(r["timeframe"], 99))
+
+    return {
         "root": str(root),
         "exists": root.exists(),
         "file_count": len(files),
-        "price_files": [],
-        "auxiliary_files": [],
+        "price_files": price_files,
+        "auxiliary_files": auxiliary_files,
     }
 
-    for path in files:
-        info = _classify_market_file(path)
-        columns, first_row = _read_csv_header_and_first_row(path)
-        last_row = _read_last_csv_row(path, columns=columns)
-        record = {
-            "path": _safe_rel(path),
-            "asset": info["asset"],
-            "timeframe": info["timeframe"],
-            "columns": columns,
-            "column_count": len(columns),
-            "inferred_dtypes": {column: _infer_text_value_type(first_row.get(column, "") if first_row else "") for column in columns},
-            "time_fields": {
-                "first": _extract_time_candidates(first_row),
-                "last": _extract_time_candidates(last_row),
-            },
-            "has_core_price_columns": sorted(CORE_PRICE_COLUMNS.intersection(columns)),
-            "indicator_columns": _detect_indicator_columns(columns),
-        }
-        bucket = "price_files" if info["dataset_type"] == "price" else "auxiliary_files"
-        summary[bucket].append(record)
 
-    return summary
+def _process_cycle_parquet(path: Path) -> dict[str, Any]:
+    """Read one cycle parquet file; returns a record dict. Used for parallel execution."""
+    schema_summary = _parquet_schema_summary(path)
+    all_cols = schema_summary["columns"]
+    dtypes = schema_summary["dtypes"]
+
+    # Describe nested columns from schema (no row read needed for struct/list cols)
+    nested: dict[str, Any] = {}
+    for col in NESTED_COLUMNS.intersection(all_cols):
+        dtype_str = dtypes.get(col, "")
+        nested[col] = {"type": dtype_str}
+
+    # Read a minimal sample only for scalar fields we actually need
+    scalar_cols = [c for c in ("cycle_id", "timeframe", "start_date", "end_date") if c in all_cols]
+    sample = _read_parquet_sample(path, scalar_cols)
+    row = sample.iloc[0].to_dict() if not sample.empty else {}
+
+    return {
+        "path": _safe_rel(path),
+        "timeframe_from_name": path.stem.replace("cycles_", ""),
+        "row_count": schema_summary["row_count"],
+        "column_count": len(all_cols),
+        "columns": all_cols,
+        "duplicate_columns": schema_summary["duplicate_columns"],
+        "indicator_columns": _detect_indicator_columns(all_cols),
+        "relation_columns": sorted(RELATION_COLUMNS.intersection(all_cols)),
+        "nested_columns": nested,
+        "timeframe_values": sorted(sample["timeframe"].dropna().astype(str).unique().tolist()) if "timeframe" in sample.columns else [],
+        "date_fields": {
+            "start_date": str(row.get("start_date")) if row.get("start_date") is not None else None,
+            "end_date": str(row.get("end_date")) if row.get("end_date") is not None else None,
+        },
+        "cycle_id_example": row.get("cycle_id"),
+    }
 
 
 def summarize_cycle_parquet_dir(root: Path, asset: str | None, label: str) -> dict[str, Any]:
     scan_root = root / asset if asset and (root / asset).exists() else root
-    files = sorted(scan_root.glob("cycles_*.parquet"))
+    files = [path for path in sorted(scan_root.glob("cycles_*.parquet")) if not _looks_temporary(path)]
 
     datasets: list[dict[str, Any]] = []
-    for path in files:
-        if _looks_temporary(path):
-            continue
-
-        schema_summary = _parquet_schema_summary(path)
-        sample_columns = [column for column in ("cycle_id", "timeframe", "start_date", "end_date", *sorted(NESTED_COLUMNS)) if column in schema_summary["columns"]]
-        sample = _read_parquet_sample(path, sample_columns)
-        row = sample.iloc[0].to_dict() if not sample.empty else {}
-        nested = {}
-        for column in NESTED_COLUMNS.intersection(sample.columns):
-            value = row.get(column)
-            nested[column] = _describe_nested_value(value) if value is not None else {"type": "null"}
-
-        datasets.append(
-            {
-                "path": _safe_rel(path),
-                "timeframe_from_name": path.stem.replace("cycles_", ""),
-                "row_count": schema_summary["row_count"],
-                "column_count": len(schema_summary["columns"]),
-                "columns": schema_summary["columns"],
-                "duplicate_columns": schema_summary["duplicate_columns"],
-                "indicator_columns": _detect_indicator_columns(schema_summary["columns"]),
-                "relation_columns": sorted(RELATION_COLUMNS.intersection(schema_summary["columns"])),
-                "nested_columns": nested,
-                "timeframe_values": sorted(sample["timeframe"].dropna().astype(str).unique().tolist()) if "timeframe" in sample.columns else [],
-                "date_fields": {
-                    "start_date": str(row.get("start_date")) if row.get("start_date") is not None else None,
-                    "end_date": str(row.get("end_date")) if row.get("end_date") is not None else None,
-                },
-                "cycle_id_example": row.get("cycle_id"),
-            }
-        )
+    with ThreadPoolExecutor(max_workers=min(len(files), 9) or 1) as pool:
+        future_map = {pool.submit(_process_cycle_parquet, path): path for path in files}
+        results: dict[Path, dict[str, Any]] = {}
+        for fut in as_completed(future_map):
+            try:
+                results[future_map[fut]] = fut.result()
+            except Exception:
+                pass
+    # preserve original sorted order
+    datasets = [results[path] for path in files if path in results]
 
     return {
         "label": label,
@@ -362,6 +410,90 @@ def summarize_hierarchy_maps(asset: str) -> dict[str, Any]:
         )
 
     return {"maps": maps, "count": len(maps)}
+
+
+def summarize_context(asset: str) -> dict[str, Any]:
+    """Summarise context files built by CycleContextBuilder (Phase 1-5)."""
+    ctx_dir = PROJECT_PATHS.context_dir(asset)
+    result: dict[str, Any] = {
+        "root": str(ctx_dir),
+        "exists": ctx_dir.exists(),
+        "cycle_dim": None,
+        "timeframe_context_1min": None,
+        "timeframe_context_1h": None,
+        "context_meta": None,
+    }
+    if not ctx_dir.exists():
+        return result
+
+    # ── cycle_dim ─────────────────────────────────────────────────────────────
+    dim_path = ctx_dir / "cycle_dim.parquet"
+    if dim_path.exists():
+        schema = _parquet_schema_summary(dim_path)
+        tf_dist: dict[str, int] = {}
+        try:
+            df_tf = pd.read_parquet(dim_path, columns=["timeframe"])
+            tf_dist = df_tf["timeframe"].astype(str).value_counts().to_dict()
+        except Exception:
+            pass
+        result["cycle_dim"] = {
+            "path": _safe_rel(dim_path),
+            "size_mb": round(dim_path.stat().st_size / 1024 / 1024, 2),
+            "row_count": schema["row_count"],
+            "column_count": len(schema["columns"]),
+            "columns": schema["columns"],
+            "timeframe_distribution": {tf: tf_dist.get(tf, 0) for tf in TIMEFRAME_ORDER if tf in tf_dist},
+        }
+
+    # ── timeframe_context files ───────────────────────────────────────────────
+    for freq in ("1min", "1h"):
+        ctx_path = ctx_dir / f"timeframe_context_{freq}.parquet"
+        key = f"timeframe_context_{freq}"
+        if not ctx_path.exists():
+            continue
+        schema = _parquet_schema_summary(ctx_path)
+        sample_info: dict[str, Any] = {}
+        try:
+            needed = [c for c in ("timestamp", "n_up_4", "n_up_8", "combo_4") if c in schema["columns"]]
+            df_sample = pd.read_parquet(ctx_path, columns=needed).head(3)
+            if not df_sample.empty:
+                sample_info["first_timestamp"] = str(df_sample["timestamp"].iloc[0]) if "timestamp" in df_sample.columns else None
+                if "n_up_4" in df_sample.columns:
+                    df_full = pd.read_parquet(ctx_path, columns=["n_up_4"])
+                    sample_info["n_up_4_distribution"] = df_full["n_up_4"].value_counts().sort_index().to_dict()
+        except Exception:
+            pass
+        # list TF key + type + prog columns compactly
+        tf_cols = [c for c in schema["columns"] if any(c.startswith(tf + "_") for tf in TIMEFRAME_ORDER)]
+        result[key] = {
+            "path": _safe_rel(ctx_path),
+            "size_mb": round(ctx_path.stat().st_size / 1024 / 1024, 2),
+            "row_count": schema["row_count"],
+            "column_count": len(schema["columns"]),
+            "all_columns": schema["columns"],
+            "tf_columns": tf_cols,
+            "sample": sample_info,
+        }
+
+    # ── context_meta.json ────────────────────────────────────────────────────
+    meta_path = ctx_dir / "context_meta.json"
+    if meta_path.exists():
+        try:
+            with meta_path.open("r", encoding="utf-8") as fh:
+                meta = json.load(fh)
+            result["context_meta"] = {
+                "path": _safe_rel(meta_path),
+                "size_kb": round(meta_path.stat().st_size / 1024, 2),
+                "version": meta.get("version"),
+                "asset": meta.get("asset"),
+                "data_range": meta.get("data_range"),
+                "timeframe_groups": meta.get("timeframe_groups"),
+                "top_level_keys": list(meta.keys()),
+            }
+        except Exception:
+            result["context_meta"] = {"path": _safe_rel(meta_path), "error": "parse_failed"}
+
+    return result
 
 
 def summarize_json_meta_dir(root: Path, label: str) -> dict[str, Any]:
@@ -418,28 +550,57 @@ def summarize_dashboard() -> dict[str, Any]:
 
 
 def build_report(asset: str) -> dict[str, Any]:
+    # Run independent sections in parallel to reduce wall-clock time
+    def _enriched() -> dict[str, Any]:
+        return summarize_cycle_parquet_dir(PROJECT_PATHS.processed_cycles_enriched_dir, asset=asset, label="processed_cycles_enriched")
+
+    def _root_copy() -> dict[str, Any]:
+        return summarize_cycle_parquet_dir(PROJECT_PATHS.processed_cycles_enriched_dir, asset=None, label="processed_cycles_root_copy")
+
+    def _base() -> dict[str, Any]:
+        base_asset = asset if (PROJECT_PATHS.processed_cycles_base_dir / asset).exists() else None
+        return summarize_cycle_parquet_dir(PROJECT_PATHS.processed_cycles_base_dir, asset=base_asset, label="processed_cycles_base")
+
+    def _hierarchy() -> dict[str, Any]:
+        return summarize_hierarchy_maps(asset)
+
+    def _features() -> dict[str, Any]:
+        return summarize_json_meta_dir(PROJECT_PATHS.processed_features_dir, label="processed_features")
+
+    def _dashboard() -> dict[str, Any]:
+        return summarize_dashboard()
+
+    def _context() -> dict[str, Any]:
+        return summarize_context(asset)
+
+    def _raw() -> dict[str, Any]:
+        return summarize_raw_market()
+
+    tasks = {
+        "raw_market": _raw,
+        "processed_cycles_enriched": _enriched,
+        "processed_cycles_root_copy": _root_copy,
+        "processed_cycles_base": _base,
+        "hierarchy_maps": _hierarchy,
+        "processed_features_meta": _features,
+        "dashboard": _dashboard,
+        "context": _context,
+    }
+
+    results: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+        future_map = {pool.submit(fn): key for key, fn in tasks.items()}
+        for fut in as_completed(future_map):
+            key = future_map[fut]
+            try:
+                results[key] = fut.result()
+            except Exception as exc:
+                results[key] = {"error": str(exc)}
+
     return {
         "paths": PROJECT_PATHS.summary(),
         "asset": asset,
-        "raw_market": summarize_raw_market(),
-        "processed_cycles_enriched": summarize_cycle_parquet_dir(
-            PROJECT_PATHS.processed_cycles_enriched_dir,
-            asset=asset,
-            label="processed_cycles_enriched",
-        ),
-        "processed_cycles_root_copy": summarize_cycle_parquet_dir(
-            PROJECT_PATHS.processed_cycles_enriched_dir,
-            asset=None,
-            label="processed_cycles_root_copy",
-        ),
-        "processed_cycles_base": summarize_cycle_parquet_dir(
-            PROJECT_PATHS.processed_cycles_base_dir,
-            asset=asset if (PROJECT_PATHS.processed_cycles_base_dir / asset).exists() else None,
-            label="processed_cycles_base",
-        ),
-        "hierarchy_maps": summarize_hierarchy_maps(asset),
-        "processed_features_meta": summarize_json_meta_dir(PROJECT_PATHS.processed_features_dir, label="processed_features"),
-        "dashboard": summarize_dashboard(),
+        **results,
     }
 
 
@@ -486,7 +647,8 @@ def print_report(report: dict[str, Any]) -> None:
             if item["relation_columns"]:
                 print(f"    relations: {', '.join(item['relation_columns'])}")
             if item["nested_columns"]:
-                print(f"    nested: {_safe_json(item['nested_columns'])}")
+                for nc, ninfo in item["nested_columns"].items():
+                    print(f"    nested  {nc}: {ninfo.get('type','?')}")
             print(f"    timeframe_values: {item['timeframe_values']} | cycle_id_example: {item['cycle_id_example']}")
             print(f"    date_fields: {item['date_fields']}")
 
@@ -506,6 +668,52 @@ def print_report(report: dict[str, Any]) -> None:
         print(f"file_count: {section['file_count']}")
         for item in section["files"][:20]:
             print(f"  - {item['path']} | keys={item['top_level_keys']}")
+
+    ctx = report.get("context", {})
+    print("\n" + "=" * 100)
+    print("CONTEXT (v2.0 architecture)")
+    print(f"root   : {ctx.get('root')}")
+    print(f"exists : {ctx.get('exists')}")
+
+    dim = ctx.get("cycle_dim")
+    if dim:
+        print(f"\n  cycle_dim.parquet")
+        print(f"    path       : {dim['path']}")
+        print(f"    size       : {dim['size_mb']} MB  |  rows={dim['row_count']}  |  cols={dim['column_count']}")
+        print(f"    columns    : {', '.join(dim['columns'])}")
+        tf_dist = dim.get("timeframe_distribution", {})
+        if tf_dist:
+            dist_str = "  ".join(f"{tf}:{cnt}" for tf, cnt in tf_dist.items())
+            print(f"    tf_dist    : {dist_str}")
+
+    for freq in ("1min", "1h"):
+        key = f"timeframe_context_{freq}"
+        tc = ctx.get(key)
+        if not tc:
+            continue
+        print(f"\n  timeframe_context_{freq}.parquet")
+        print(f"    path       : {tc['path']}")
+        print(f"    size       : {tc['size_mb']} MB  |  rows={tc['row_count']}  |  cols={tc['column_count']}")
+        print(f"    all_cols   : {', '.join(tc['all_columns'])}")
+        if tc.get("tf_columns"):
+            print(f"    tf_cols    : {', '.join(tc['tf_columns'])}")
+        sample = tc.get("sample", {})
+        if sample.get("first_timestamp"):
+            print(f"    first_ts   : {sample['first_timestamp']}")
+        if sample.get("n_up_4_distribution"):
+            dist_str = "  ".join(f"{k}:{v}" for k, v in sorted(sample["n_up_4_distribution"].items()))
+            print(f"    n_up_4_dist: {dist_str}")
+
+    meta = ctx.get("context_meta")
+    if meta:
+        print(f"\n  context_meta.json")
+        print(f"    path       : {meta.get('path')}")
+        print(f"    version    : {meta.get('version')}  |  asset={meta.get('asset')}")
+        if meta.get("data_range"):
+            print(f"    data_range : {meta['data_range']}")
+        if meta.get("timeframe_groups"):
+            print(f"    tf_groups  : {meta['timeframe_groups']}")
+        print(f"    keys       : {meta.get('top_level_keys')}")
 
     dashboard = report["dashboard"]
     print("\n" + "=" * 100)

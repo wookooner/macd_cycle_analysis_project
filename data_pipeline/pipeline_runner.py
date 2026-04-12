@@ -76,7 +76,7 @@ def _asset_specs() -> dict[str, AssetSpec]:
                 "1M": "BTCUSD_1M.csv",
             },
             cycle_dir=PROJECT_PATHS.asset_cycle_dir("btc"),
-            legacy_cycle_dir=PROJECT_PATHS.cycle_structured_dir,
+            legacy_cycle_dir=None,  # root-level copies archived — btc/ is the only canonical location
             funding_rate_file="BTCUSDT_funding_rate.csv",
             has_cvd=True,
             cvd_rolling={
@@ -151,7 +151,7 @@ def _resolve_market_input_path(timeframe: str, filename: str) -> Path:
 
 def step_collect(asset: str, collect_futures: bool = True, dry_run: bool = False) -> bool:
     spec = _asset_specs()[asset]
-    _section(f"Step 1 / 4 : collect - {spec.label}")
+    _section(f"Step 1 / 5 : collect - {spec.label}")
     started_at = time.time()
 
     if dry_run:
@@ -192,7 +192,7 @@ def step_collect(asset: str, collect_futures: bool = True, dry_run: bool = False
 
 def step_indicator(asset: str, force: bool = False, dry_run: bool = False) -> bool:
     spec = _asset_specs()[asset]
-    _section(f"Step 2 / 4 : indicators - {spec.label}")
+    _section(f"Step 2 / 5 : indicators - {spec.label}")
     started_at = time.time()
 
     from data_pipeline.indicators.indicator import IndicatorCalculator
@@ -269,7 +269,7 @@ def _load_funding_rate_if_available(spec: AssetSpec) -> pd.DataFrame | None:
 
 def step_detect(asset: str, dry_run: bool = False) -> bool:
     spec = _asset_specs()[asset]
-    _section(f"Step 3 / 4 : detect - {spec.label}")
+    _section(f"Step 3 / 5 : detect - {spec.label}")
     started_at = time.time()
 
     spec.cycle_dir.mkdir(parents=True, exist_ok=True)
@@ -323,7 +323,7 @@ def step_detect(asset: str, dry_run: bool = False) -> bool:
 
 def step_map(asset: str, dry_run: bool = False) -> bool:
     spec = _asset_specs()[asset]
-    _section(f"Step 4 / 4 : hierarchy map - {spec.label}")
+    _section(f"Step 4 / 5 : hierarchy map (optional) - {spec.label}")
     started_at = time.time()
 
     if not spec.cycle_dir.exists():
@@ -489,7 +489,14 @@ ALL_STEPS = [1, 2, 3, 4, 5]
 STEP_NAMES = {1: "collect", 2: "indicator", 3: "detect", 4: "map", 5: "context"}
 
 
-def step_context(asset: str, dry_run: bool = False) -> bool:
+def step_context(asset: str, dry_run: bool = False, full_rebuild: bool = True) -> bool:
+    """Build cycle_dim, timeframe_context, and enrich cycle parquets (Step 5).
+
+    full_rebuild=True  : run all phases (required when Step 3 detect ran)
+    full_rebuild=False : skip phases 1+2 (reuse existing dim/context tables,
+                         re-enrich and re-validate only) — safe when cycles are
+                         unchanged and only Step 5 is being re-run standalone.
+    """
     spec = _asset_specs()[asset]
     _section(f"Step 5 / 5 : context - {spec.label}")
     started_at = time.time()
@@ -504,10 +511,12 @@ def step_context(asset: str, dry_run: bool = False) -> bool:
     )
 
     if dry_run:
-        LOGGER.info("Dry run: would build context in %s", builder.context_dir)
+        rebuild_label = "full" if full_rebuild else "enrich-only (skip phases 1+2)"
+        LOGGER.info("Dry run: would build context [%s] in %s", rebuild_label, builder.context_dir)
         return True
 
-    ok = builder.run_all()
+    skip_phases = None if full_rebuild else [1, 2]
+    ok = builder.run_all(skip_phases=skip_phases)
     LOGGER.info("Step 5 complete (%s)", _elapsed(started_at))
     return ok
 
@@ -534,12 +543,17 @@ def run_pipeline(
     LOGGER.info("Dry run: %s", dry_run)
     LOGGER.info("Outputs: %s", summarize_pipeline_outputs(asset))
 
+    # If Step 3 (detect) runs in this session, cycles will have changed — context
+    # must rebuild dim + context tables from scratch.  When Step 5 is run standalone
+    # (without Step 3), cycles are unchanged so we can skip the expensive phases 1+2.
+    context_full_rebuild = 3 in steps
+
     step_functions = {
         1: lambda: step_collect(asset, collect_futures=collect_futures, dry_run=dry_run),
         2: lambda: step_indicator(asset, force=force, dry_run=dry_run),
         3: lambda: step_detect(asset, dry_run=dry_run),
         4: lambda: step_map(asset, dry_run=dry_run),
-        5: lambda: step_context(asset, dry_run=dry_run),
+        5: lambda: step_context(asset, dry_run=dry_run, full_rebuild=context_full_rebuild),
     }
 
     results: dict[int, bool] = {}
@@ -568,7 +582,19 @@ def run_pipeline(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MACD cycle data pipeline.")
     parser.add_argument("--asset", choices=["btc", "gold", "all"], default="btc")
-    parser.add_argument("--steps", nargs="+", type=int, default=[1, 2, 3, 4], choices=ALL_STEPS)
+    parser.add_argument(
+        "--steps",
+        nargs="+",
+        type=int,
+        default=[1, 2, 3, 5],
+        choices=ALL_STEPS,
+        help=(
+            "Pipeline steps to run (default: 1 2 3 5). "
+            "1=collect, 2=indicators, 3=detect, "
+            "4=hierarchy map JSON (optional, kept for cross-validation), "
+            "5=context v2.0 (cycle_dim + timeframe_context + enriched parquets)."
+        ),
+    )
     parser.add_argument("--force", action="store_true", help="Recalculate indicators from scratch.")
     parser.add_argument("--no-futures", dest="no_futures", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Log planned work without writing outputs.")
