@@ -1,0 +1,66 @@
+stops:
+  - stop_name: opposite_true_reversal_confirmed_close
+    stop_kind: cycle_exit
+    params: {}
+    exit_priority: [cycle_exit]
+    description: Exit at same-entry-TF opposite true reversal close.
+  - stop_name: partial_tp_0.6_50_then_opposite
+    stop_kind: partial_tp
+    params: {tp_pct: 0.6, partial_ratio: 0.5}
+    exit_priority: [partial_tp, cycle_exit]
+    description: Take 50 percent at +0.6%, hold remainder to opposite true reversal.
+  - stop_name: partial_tp_0.8_50_then_opposite
+    stop_kind: partial_tp
+    params: {tp_pct: 0.8, partial_ratio: 0.5}
+    exit_priority: [partial_tp, cycle_exit]
+    description: Take 50 percent at +0.8%, hold remainder to opposite true reversal.
+  - stop_name: partial_tp_1.0_50_then_opposite
+    stop_kind: partial_tp
+    params: {tp_pct: 1.0, partial_ratio: 0.5}
+    exit_priority: [partial_tp, cycle_exit]
+    description: Take 50 percent at +1.0%, hold remainder to opposite true reversal.
+  - stop_name: partial_tp_1.2_50_then_opposite
+    stop_kind: partial_tp
+    params: {tp_pct: 1.2, partial_ratio: 0.5}
+    exit_priority: [partial_tp, cycle_exit]
+    description: Take 50 percent at +1.2%, hold remainder to opposite true reversal.
+  - stop_name: tp_sl_0.8_0.4
+    stop_kind: tp_sl
+    params: {tp_pct: 0.8, sl_pct: 0.4}
+    exit_priority: [stop_loss, take_profit]
+    description: Fixed TP/SL, stop-first if same candle hits both.
+  - stop_name: tp_sl_1.2_0.6
+    stop_kind: tp_sl
+    params: {tp_pct: 1.2, sl_pct: 0.6}
+    exit_priority: [stop_loss, take_profit]
+    description: Fixed TP/SL, stop-first if same candle hits both.
+  - stop_name: candidate_candle_invalidation
+    stop_kind: structural_invalidation
+    params: {basis: candidate}
+    exit_priority: [invalidation, cycle_exit]
+    description: Candidate candle low/high invalidation, comparison baseline only.
+  - stop_name: recent_swing_4_invalidation
+    stop_kind: structural_invalidation
+    params: {basis: recent_swing, lookback_bars: 4}
+    exit_priority: [invalidation, cycle_exit]
+    description: Recent 4-bar swing invalidation.
+  - stop_name: recent_swing_8_invalidation
+    stop_kind: structural_invalidation
+    params: {basis: recent_swing, lookback_bars: 8}
+    exit_priority: [invalidation, cycle_exit]
+    description: Recent 8-bar swing invalidation.
+  - stop_name: recent_swing_16_invalidation
+    stop_kind: structural_invalidation
+    params: {basis: recent_swing, lookback_bars: 16}
+    exit_priority: [invalidation, cycle_exit]
+    description: Recent 16-bar swing invalidation.
+  - stop_name: h1_swing_invalidation
+    stop_kind: structural_invalidation
+    params: {basis: h1_swing, lookback_bars: 8}
+    exit_priority: [invalidation, cycle_exit]
+    description: Last closed 1h swing invalidation.
+  - stop_name: atr_buffered_swing_0.5
+    stop_kind: structural_invalidation
+    params: {basis: recent_swing, lookback_bars: 8, atr_buffer: 0.5}
+    exit_priority: [invalidation, cycle_exit]
+    description: Recent swing invalidation with 0.5 ATR buffer.

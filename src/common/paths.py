@@ -55,6 +55,10 @@ class ProjectPaths:
     data_root: Path
     runtime_data_root: Path
     legacy_data_root: Path
+    archive_root: Path
+    metadata_root: Path
+    manifests_root: Path
+    quality_reports_root: Path
     raw_root: Path
     interim_root: Path
     processed_root: Path
@@ -95,6 +99,10 @@ class ProjectPaths:
     def ensure_runtime_dirs(self) -> None:
         for directory in [
             self.data_root,
+            self.archive_root,
+            self.metadata_root,
+            self.manifests_root,
+            self.quality_reports_root,
             self.raw_root,
             self.interim_root,
             self.processed_root,
@@ -129,6 +137,10 @@ class ProjectPaths:
             "data_root": str(self.data_root),
             "runtime_data_root": str(self.runtime_data_root),
             "legacy_data_root": str(self.legacy_data_root),
+            "archive_root": str(self.archive_root),
+            "metadata_root": str(self.metadata_root),
+            "manifests_root": str(self.manifests_root),
+            "quality_reports_root": str(self.quality_reports_root),
             "raw_root": str(self.raw_root),
             "processed_root": str(self.processed_root),
             "dashboard_root": str(self.dashboard_root),
@@ -193,6 +205,10 @@ def load_project_paths(config_path: Path | None = None) -> ProjectPaths:
     data_root = _resolve_path(project_root, os.getenv(data_root_env, str(default_data_root)))
 
     raw_root = data_root / "raw"
+    archive_root = data_root / data_cfg.get("archive_root", "archive")
+    metadata_root = data_root / data_cfg.get("metadata_root", "metadata")
+    manifests_root = metadata_root / "manifests"
+    quality_reports_root = metadata_root / "quality_reports"
     interim_root = data_root / "interim"
     processed_root = data_root / "processed"
     dashboard_root = data_root / data_cfg.get("dashboard_root", "dashboard")
@@ -223,6 +239,10 @@ def load_project_paths(config_path: Path | None = None) -> ProjectPaths:
         data_root=data_root,
         runtime_data_root=default_data_root,
         legacy_data_root=repo_legacy_data_root,
+        archive_root=archive_root,
+        metadata_root=metadata_root,
+        manifests_root=manifests_root,
+        quality_reports_root=quality_reports_root,
         raw_root=raw_root,
         interim_root=interim_root,
         processed_root=processed_root,

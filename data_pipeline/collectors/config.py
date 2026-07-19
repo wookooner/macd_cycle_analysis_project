@@ -83,6 +83,8 @@ ALL_COLUMNS = [
     "macd_signal",
     "macd_hist",
     "rsi",
+    "stoch_rsi_k",
+    "stoch_rsi_d",
 ]
 
 PIPELINE_MARKET_COLUMNS = [
@@ -98,6 +100,8 @@ PIPELINE_MARKET_COLUMNS = [
     "macd_signal",
     "macd_hist",
     "rsi",
+    "stoch_rsi_k",
+    "stoch_rsi_d",
     "volume",
     "taker_buy_base",
     "volume_delta",

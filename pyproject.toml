@@ -16,6 +16,7 @@ dependencies = [
   "requests>=2.31.0",
   "python-dotenv>=1.0.0",
   "binance-connector>=3.8.0",
+  "binance-futures-connector>=4.1.0",
 ]
 
 [tool.setuptools]

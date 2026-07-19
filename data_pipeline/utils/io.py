@@ -7,8 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 
-BACKUP_KEEP_OLDEST = 3
-BACKUP_KEEP_NEWEST = 5
+KEEP_RECENT_GENERATED_FILES = 3
+BACKUP_KEEP_OLDEST = 0
+BACKUP_KEEP_NEWEST = KEEP_RECENT_GENERATED_FILES
 _VALIDATION_SAMPLE_BYTES = 4096
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,40 @@ def _iter_recovery_candidates(path: Path):
         yield candidate
 
 
+def _prune_file_list(files: list[Path], keep_recent: int = KEEP_RECENT_GENERATED_FILES) -> None:
+    if keep_recent <= 0 or len(files) <= keep_recent:
+        return
+    ordered = sorted(
+        [path for path in files if path.exists() and path.is_file()],
+        key=lambda item: (item.stat().st_mtime_ns, item.name),
+        reverse=True,
+    )
+    for file_path in ordered[keep_recent:]:
+        file_path.unlink(missing_ok=True)
+
+
+def prune_related_generated_files(path: str | Path, keep_recent: int = KEEP_RECENT_GENERATED_FILES) -> None:
+    """Keep only recent temp/recovery/backup siblings for one generated data file.
+
+    This covers the common data-file clutter patterns:
+    - ``<name>.<uuid>.tmp`` and ``<name>.<uuid>.recovery`` beside the file
+    - ``<name>.backup_*`` and ``<name>.backfill_backup_*`` in the configured backup directory
+    - same-directory backup variants created by older scripts
+    """
+    target = Path(path)
+    parent = target.parent
+    if parent.exists():
+        _prune_file_list(list(parent.glob(f"{target.name}.*.tmp")), keep_recent=keep_recent)
+        _prune_file_list(list(parent.glob(f"{target.name}.*.recovery")), keep_recent=keep_recent)
+        _prune_file_list(list(parent.glob(f"{target.name}.backup_*")), keep_recent=keep_recent)
+        _prune_file_list(list(parent.glob(f"{target.name}.backfill_backup_*")), keep_recent=keep_recent)
+
+    backup_dir = parent.parent / "backup_data"
+    if backup_dir.exists():
+        _prune_file_list(list(backup_dir.glob(f"{target.name}.backup_*")), keep_recent=keep_recent)
+        _prune_file_list(list(backup_dir.glob(f"{target.name}.backfill_backup_*")), keep_recent=keep_recent)
+
+
 def load_csv_with_recovery(
     path: str | Path,
     required_columns: list[str] | None = None,
@@ -128,6 +163,7 @@ def atomic_write_csv(df: pd.DataFrame, output_path: str | Path, **to_csv_kwargs)
             temp_path.unlink(missing_ok=True)
         if recovery_path is not None and recovery_path.exists():
             recovery_path.unlink(missing_ok=True)
+        prune_related_generated_files(path)
 
 
 def prune_backup_files(backup_dir: str | Path, keep_oldest: int = BACKUP_KEEP_OLDEST, keep_newest: int = BACKUP_KEEP_NEWEST) -> None:

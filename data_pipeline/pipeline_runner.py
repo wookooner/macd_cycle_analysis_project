@@ -5,6 +5,7 @@ Pipeline runner for collection, indicator updates, cycle detection, and hierarch
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import shutil
 import sys
@@ -76,7 +77,7 @@ def _asset_specs() -> dict[str, AssetSpec]:
                 "1M": "BTCUSD_1M.csv",
             },
             cycle_dir=PROJECT_PATHS.asset_cycle_dir("btc"),
-            legacy_cycle_dir=None,  # root-level copies archived — btc/ is the only canonical location
+            legacy_cycle_dir=None,  # Root-level copies are archived; btc/ is the only canonical location.
             funding_rate_file="BTCUSDT_funding_rate.csv",
             has_cvd=True,
             cvd_rolling={
@@ -158,11 +159,11 @@ def step_collect(asset: str, collect_futures: bool = True, dry_run: bool = False
         LOGGER.info("Dry run: collection skipped.")
         return True
 
-    if asset == "btc":
-        from data_pipeline.collectors.new_collcetor import AdvancedBTCDataCollectorV2
+    from data_pipeline.collectors.registry import create_collector
 
+    if asset == "btc":
         try:
-            collector = AdvancedBTCDataCollectorV2()
+            collector = create_collector(asset)
             LOGGER.info("Updating BTC OHLCV files")
             collector.update_all_ohlcv()
             if collect_futures:
@@ -173,10 +174,8 @@ def step_collect(asset: str, collect_futures: bool = True, dry_run: bool = False
             return False
 
     elif asset == "gold":
-        from data_pipeline.collectors.gold_collector import GoldDataCollector
-
         try:
-            collector = GoldDataCollector()
+            collector = create_collector(asset)
             if not collector.api_key:
                 LOGGER.error("API_NINJAS_KEY is required for gold collection.")
                 return False
@@ -267,7 +266,7 @@ def _load_funding_rate_if_available(spec: AssetSpec) -> pd.DataFrame | None:
     return StructuredCycleProcessor.load_funding_rate(funding_rate_path)
 
 
-def step_detect(asset: str, dry_run: bool = False) -> bool:
+def step_detect(asset: str, dry_run: bool = False, timeframes: list[str] | None = None) -> bool:
     spec = _asset_specs()[asset]
     _section(f"Step 3 / 5 : detect - {spec.label}")
     started_at = time.time()
@@ -283,7 +282,10 @@ def step_detect(asset: str, dry_run: bool = False) -> bool:
     funding_rate_df = _load_funding_rate_if_available(spec)
 
     timeframe_files: dict[str, Path] = {}
+    requested_timeframes = set(timeframes or spec.data_files.keys())
     for timeframe, filename in spec.data_files.items():
+        if timeframe not in requested_timeframes:
+            continue
         candidate = _resolve_market_input_path(timeframe, filename)
         if candidate.exists():
             timeframe_files[timeframe] = candidate
@@ -485,8 +487,15 @@ def _merge_futures_into_ohlcv(data_dir: Path, timeframe: str, ohlcv_filename: st
         return False
 
 
-ALL_STEPS = [1, 2, 3, 4, 5]
-STEP_NAMES = {1: "collect", 2: "indicator", 3: "detect", 4: "map", 5: "context"}
+ALL_STEPS = [1, 2, 3, 4, 5, 6]
+STEP_NAMES = {
+    1: "collect",
+    2: "indicator",
+    3: "detect",
+    4: "map",
+    5: "context",
+    6: "microstructure-live",
+}
 
 
 def step_context(asset: str, dry_run: bool = False, full_rebuild: bool = True) -> bool:
@@ -494,7 +503,7 @@ def step_context(asset: str, dry_run: bool = False, full_rebuild: bool = True) -
 
     full_rebuild=True  : run all phases (required when Step 3 detect ran)
     full_rebuild=False : skip phases 1+2 (reuse existing dim/context tables,
-                         re-enrich and re-validate only) — safe when cycles are
+                         re-enrich and re-validate only) - safe when cycles are
                          unchanged and only Step 5 is being re-run standalone.
     """
     spec = _asset_specs()[asset]
@@ -521,6 +530,68 @@ def step_context(asset: str, dry_run: bool = False, full_rebuild: bool = True) -
     return ok
 
 
+def step_microstructure_live(
+    asset: str,
+    dry_run: bool = False,
+    symbol: str = "BTCUSDT",
+    timeframe: str = "1min",
+    batch_rows: int = 200_000,
+    flush_seconds: int = 3600,
+    keep_files: int = 0,
+    rest_poll_seconds: int = 60,
+    depth_stream: str = "depth20@100ms",
+    depth_levels: int = 20,
+) -> bool:
+    """Run Binance microstructure collection continuously.
+
+    This step intentionally does not return until interrupted. Put it last in
+    --steps when combining it with the finite MACD pipeline steps.
+    """
+    if asset != "btc":
+        LOGGER.warning("Microstructure collection is BTC/Binance-only; skipping for asset=%s", asset)
+        return True
+
+    _section("Step 6 / 6 : microstructure live collection - BTC (Binance)")
+    if dry_run:
+        LOGGER.info(
+            "Dry run: would collect %s microstructure streams forever "
+            "(timeframe=%s, batch_rows=%s, flush_seconds=%s, keep_files=%s)",
+            symbol,
+            timeframe,
+            batch_rows,
+            flush_seconds,
+            keep_files,
+        )
+        return True
+
+    from data_pipeline.microstructure.binance_collector import run_collector
+
+    args = argparse.Namespace(
+        symbol=symbol,
+        timeframe=timeframe,
+        streams=None,
+        depth_stream=depth_stream,
+        depth_levels=depth_levels,
+        batch_rows=batch_rows,
+        flush_seconds=flush_seconds,
+        keep_files=keep_files,
+        rest_poll_seconds=rest_poll_seconds,
+        rest_periods=["5m", "15m", "1h"],
+    )
+    LOGGER.info(
+        "Starting continuous microstructure collection: symbol=%s depth=%s keep_files=%s",
+        symbol,
+        depth_stream,
+        keep_files,
+    )
+    try:
+        asyncio.run(run_collector(args))
+    except KeyboardInterrupt:
+        LOGGER.info("Microstructure collection stopped by user.")
+        return True
+    return True
+
+
 def run_pipeline(
     asset: str,
     steps: list[int],
@@ -528,6 +599,15 @@ def run_pipeline(
     collect_futures: bool = True,
     dry_run: bool = False,
     log_paths: bool = True,
+    timeframes: list[str] | None = None,
+    microstructure_symbol: str = "BTCUSDT",
+    microstructure_timeframe: str = "1min",
+    microstructure_batch_rows: int = 200_000,
+    microstructure_flush_seconds: int = 3600,
+    microstructure_keep_files: int = 0,
+    microstructure_rest_poll_seconds: int = 60,
+    microstructure_depth_stream: str = "depth20@100ms",
+    microstructure_depth_levels: int = 20,
 ) -> bool:
     _setup_logging()
     total_started_at = time.time()
@@ -541,19 +621,39 @@ def run_pipeline(
     LOGGER.info("Steps: %s", steps)
     LOGGER.info("Force recalculation: %s", force)
     LOGGER.info("Dry run: %s", dry_run)
+    LOGGER.info("Timeframes: %s", timeframes or "all")
+    if 6 in steps:
+        LOGGER.info(
+            "Microstructure live: symbol=%s timeframe=%s keep_files=%s",
+            microstructure_symbol,
+            microstructure_timeframe,
+            microstructure_keep_files,
+        )
     LOGGER.info("Outputs: %s", summarize_pipeline_outputs(asset))
 
-    # If Step 3 (detect) runs in this session, cycles will have changed — context
-    # must rebuild dim + context tables from scratch.  When Step 5 is run standalone
-    # (without Step 3), cycles are unchanged so we can skip the expensive phases 1+2.
+    # If Step 3 (detect) runs in this session, cycles will have changed, so context
+    # must rebuild dim and context tables from scratch. When Step 5 is run
+    # standalone (without Step 3), cycles are unchanged so phases 1 and 2 can be skipped.
     context_full_rebuild = 3 in steps
 
     step_functions = {
         1: lambda: step_collect(asset, collect_futures=collect_futures, dry_run=dry_run),
         2: lambda: step_indicator(asset, force=force, dry_run=dry_run),
-        3: lambda: step_detect(asset, dry_run=dry_run),
+        3: lambda: step_detect(asset, dry_run=dry_run, timeframes=timeframes),
         4: lambda: step_map(asset, dry_run=dry_run),
         5: lambda: step_context(asset, dry_run=dry_run, full_rebuild=context_full_rebuild),
+        6: lambda: step_microstructure_live(
+            asset,
+            dry_run=dry_run,
+            symbol=microstructure_symbol,
+            timeframe=microstructure_timeframe,
+            batch_rows=microstructure_batch_rows,
+            flush_seconds=microstructure_flush_seconds,
+            keep_files=microstructure_keep_files,
+            rest_poll_seconds=microstructure_rest_poll_seconds,
+            depth_stream=microstructure_depth_stream,
+            depth_levels=microstructure_depth_levels,
+        ),
     }
 
     results: dict[int, bool] = {}
@@ -592,11 +692,21 @@ def _parse_args() -> argparse.Namespace:
             "Pipeline steps to run (default: 1 2 3 5). "
             "1=collect, 2=indicators, 3=detect, "
             "4=hierarchy map JSON (optional, kept for cross-validation), "
-            "5=context v2.0 (cycle_dim + timeframe_context + enriched parquets)."
+            "5=context v2.0 (cycle_dim + timeframe_context + enriched parquets), "
+            "6=microstructure live collector (runs until interrupted)."
         ),
     )
     parser.add_argument("--force", action="store_true", help="Recalculate indicators from scratch.")
     parser.add_argument("--no-futures", dest="no_futures", action="store_true")
+    parser.add_argument("--timeframes", nargs="+", default=None, help="Limit cycle detection to selected timeframes.")
+    parser.add_argument("--microstructure-symbol", default="BTCUSDT")
+    parser.add_argument("--microstructure-timeframe", default="1min")
+    parser.add_argument("--microstructure-batch-rows", type=int, default=200_000)
+    parser.add_argument("--microstructure-flush-seconds", type=int, default=3600)
+    parser.add_argument("--microstructure-keep-files", type=int, default=0)
+    parser.add_argument("--microstructure-rest-poll-seconds", type=int, default=60)
+    parser.add_argument("--microstructure-depth-stream", default="depth20@100ms")
+    parser.add_argument("--microstructure-depth-levels", type=int, default=20)
     parser.add_argument("--dry-run", action="store_true", help="Log planned work without writing outputs.")
     parser.add_argument("--validate-paths-only", action="store_true", help="Only validate configured paths.")
     return parser.parse_args()
@@ -622,6 +732,15 @@ def main() -> int:
             collect_futures=not args.no_futures,
             dry_run=args.dry_run,
             log_paths=False,
+            timeframes=args.timeframes,
+            microstructure_symbol=args.microstructure_symbol,
+            microstructure_timeframe=args.microstructure_timeframe,
+            microstructure_batch_rows=args.microstructure_batch_rows,
+            microstructure_flush_seconds=args.microstructure_flush_seconds,
+            microstructure_keep_files=args.microstructure_keep_files,
+            microstructure_rest_poll_seconds=args.microstructure_rest_poll_seconds,
+            microstructure_depth_stream=args.microstructure_depth_stream,
+            microstructure_depth_levels=args.microstructure_depth_levels,
         )
         overall_ok = overall_ok and ok
 

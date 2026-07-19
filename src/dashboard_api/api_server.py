@@ -5,7 +5,8 @@ import json
 import logging
 import threading
 import traceback
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 import argparse
 
 import numpy as np
@@ -15,11 +16,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.common.paths import PROJECT_PATHS
 from src.dashboard_api.base_data_api import router as base_data_router
+from src.dashboard_api.cycle_candle_api import router as cycle_candle_router
+from src.dashboard_api.data_management_api import router as data_management_router
+from src.dashboard_api.realtime_api import create_realtime_router
 from src.dashboard_api.routes import router as dashboard_router
+from src.dashboard_api.timeframe_context_api import router as timeframe_context_router
+from src.realtime.binance_kline_stream import BinanceKlineSupervisor
+from src.realtime.binance_footprint_stream import BinanceFootprintSupervisor
+from src.realtime.event_bus import event_bus
+from src.realtime.websocket_manager import WebSocketManager
 
 
 LOGGER = logging.getLogger("integrated_api_server")
 router = APIRouter()
+websocket_manager = WebSocketManager(event_bus)
 
 
 def create_app(
@@ -31,6 +41,19 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        LOGGER.info("Starting realtime WebSocket forwarder and Binance kline supervisor")
+        websocket_forwarder_task = asyncio.create_task(websocket_manager.run(), name="websocket-forwarder")
+        realtime_supervisor = BinanceKlineSupervisor(event_bus)
+        footprint_supervisor = BinanceFootprintSupervisor(event_bus)
+        realtime_supervisor_task = asyncio.create_task(realtime_supervisor.run(), name="binance-kline-supervisor")
+        footprint_supervisor_task = asyncio.create_task(footprint_supervisor.run(), name="binance-footprint-supervisor")
+        app.state.websocket_manager = websocket_manager
+        app.state.realtime_supervisor = realtime_supervisor
+        app.state.realtime_supervisor_task = realtime_supervisor_task
+        app.state.footprint_supervisor = footprint_supervisor
+        app.state.footprint_supervisor_task = footprint_supervisor_task
+        app.state.websocket_forwarder_task = websocket_forwarder_task
+
         if enable_live_update:
             from src.services.live_update_service import LiveUpdateService
 
@@ -46,13 +69,33 @@ def create_app(
             thread.start()
             app.state.live_update_service = service
             app.state.live_update_thread = thread
-        yield
+        try:
+            yield
+        finally:
+            LOGGER.info("Stopping realtime services")
+            await realtime_supervisor.stop()
+            await footprint_supervisor.stop()
+            await websocket_manager.stop()
+            await websocket_manager.close_all()
+            realtime_supervisor_task.cancel()
+            footprint_supervisor_task.cancel()
+            websocket_forwarder_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await realtime_supervisor_task
+            with suppress(asyncio.CancelledError):
+                await footprint_supervisor_task
+            with suppress(asyncio.CancelledError):
+                await websocket_forwarder_task
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
     app.include_router(dashboard_router)
     app.include_router(base_data_router)
+    app.include_router(cycle_candle_router)
+    app.include_router(data_management_router)
+    app.include_router(timeframe_context_router)
+    app.include_router(create_realtime_router(websocket_manager))
     return app
 
 

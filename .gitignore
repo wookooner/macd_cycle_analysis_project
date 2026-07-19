@@ -40,6 +40,7 @@ outputs/
 reports/
 logs/
 *.log
+tmux-client-*.log
 analysis_results/
 pattern_discovery_results/
 feature_analysis_report/
@@ -63,3 +64,6 @@ trading_bot/logs/
 
 # Aperant data directory
 .auto-claude/
+
+# Local infra runtime state
+infra/metabase/volumes/

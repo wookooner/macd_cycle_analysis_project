@@ -8,6 +8,10 @@ project:
   default_data_root: C:/Users/qw370/macd-cycle-data
 
 data:
+  # Every generated data asset lives below data_root.  `archive` keeps the
+  # provider's original downloads; `raw` contains normalized, queryable data.
+  archive_root: archive
+  metadata_root: metadata
   raw_market: raw/market
   raw_hierarchy: raw/hierarchy
   raw_trades: raw/trades

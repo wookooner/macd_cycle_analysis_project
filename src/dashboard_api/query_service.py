@@ -1,8 +1,11 @@
-import json
+﻿from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pyarrow.parquet as pq
 from fastapi import HTTPException
 
 from src.common.paths import PROJECT_PATHS
@@ -14,108 +17,591 @@ from src.dashboard_api.query_engine import (
 
 
 DASHBOARD_DATA_DIR = PROJECT_PATHS.dashboard_root / "candles"
-DASHBOARD_META_DIR = PROJECT_PATHS.dashboard_root / "meta"
 MAX_PREVIEW_ROWS = 200
+MAX_FILTER_OPTIONS = 80
+MAX_GROUPABLE_NUMERIC_VALUES = 24
 TIMEFRAME_ORDER = ("1min", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M")
 SCATTER_DOWNSAMPLE_THRESHOLD = 2400
 SCATTER_GRID_X = 120
 SCATTER_GRID_Y = 72
 
-_DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
-_META_CACHE: dict[str, dict[str, Any]] = {}
+BOUNDARY_LABELS = {
+    0: "normal",
+    1: "straddle",
+    2: "transition_trigger",
+}
+PARENT_ASSIGN_RULE_LABELS = {
+    0: "contained",
+    1: "by_start",
+}
+TYPE_CODE_LABELS = {
+    -1: "down",
+    1: "up",
+}
+
+
+@dataclass(frozen=True)
+class DatasetInfo:
+    id: str
+    asset: str
+    timeframe: str
+    source: str
+    label: str
+    path: Path
+    row_count: int
+    child_timeframe: str | None = None
+
+
+_DATASET_CATALOG_CACHE: dict[str, DatasetInfo] | None = None
+_BASE_DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 _QUERY_DATAFRAME_CACHE: dict[str, pd.DataFrame] = {}
 _FEATURE_RESPONSE_CACHE: dict[str, dict[str, Any]] = {}
 
 
-def _dataset_path(dataset: str) -> Path:
-    return DASHBOARD_DATA_DIR / f"{dataset}.parquet"
+def _compact_label(value: str) -> str:
+    return value.replace("__", " / ").replace("_", " ").strip().title()
 
 
-def _meta_path(dataset: str) -> Path:
-    return DASHBOARD_META_DIR / f"{dataset}_features.json"
-
-
-def _load_dataset(dataset: str) -> pd.DataFrame:
-    if dataset in _DATAFRAME_CACHE:
-        return _DATAFRAME_CACHE[dataset].copy()
-
-    path = _dataset_path(dataset)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset}")
-
-    df = pd.read_parquet(path)
-    _DATAFRAME_CACHE[dataset] = df
-    return df.copy()
-
-
-def _load_meta(dataset: str) -> dict[str, Any]:
-    if dataset in _META_CACHE:
-        return _META_CACHE[dataset]
-
-    path = _meta_path(dataset)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Metadata not found: {dataset}")
-
-    meta = json.loads(path.read_text(encoding="utf-8"))
-    _META_CACHE[dataset] = meta
-    return meta
-
-
-def _parse_dataset_name(dataset: str) -> tuple[str, str]:
-    if "_" not in dataset:
-        raise HTTPException(status_code=400, detail=f"Invalid dataset name: {dataset}")
-    return dataset.split("_", 1)
+def _timeframe_sort_key(timeframe: str) -> int:
+    try:
+        return TIMEFRAME_ORDER.index(timeframe)
+    except ValueError:
+        return len(TIMEFRAME_ORDER) + 1
 
 
 def _parent_timeframes(timeframe: str) -> list[str]:
     if timeframe not in TIMEFRAME_ORDER:
         return []
     idx = TIMEFRAME_ORDER.index(timeframe)
-    return [tf for tf in TIMEFRAME_ORDER[idx + 1 :] if tf in {"5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"}]
+    return list(TIMEFRAME_ORDER[idx + 1 :])
+
+
+def _child_timeframe(timeframe: str) -> str | None:
+    if timeframe not in TIMEFRAME_ORDER:
+        return None
+    idx = TIMEFRAME_ORDER.index(timeframe)
+    return TIMEFRAME_ORDER[idx - 1] if idx > 0 else None
 
 
 def _relation_prefix(parent_timeframe: str) -> str:
     return f"parent_{parent_timeframe}__"
 
 
-def _build_relation_fields(dataset: str) -> list[dict[str, Any]]:
-    asset, timeframe = _parse_dataset_name(dataset)
-    relation_fields: list[dict[str, Any]] = []
+def _read_row_count(path: Path) -> int:
+    return int(pq.ParquetFile(path).metadata.num_rows)
 
-    for parent_timeframe in _parent_timeframes(timeframe):
-        parent_dataset = f"{asset}_{parent_timeframe}"
-        parent_meta_path = _meta_path(parent_dataset)
-        if not parent_meta_path.exists():
+
+def _build_dataset_catalog() -> dict[str, DatasetInfo]:
+    catalog: dict[str, DatasetInfo] = {}
+    cycle_root = PROJECT_PATHS.cycle_structured_dir
+
+    if cycle_root.exists():
+        for asset_dir in sorted(cycle_root.iterdir()):
+            if not asset_dir.is_dir() or asset_dir.name == "archive":
+                continue
+            asset = asset_dir.name
+            for path in sorted(asset_dir.glob("cycles_*.parquet")):
+                timeframe = path.stem.replace("cycles_", "", 1)
+                dataset_id = f"{asset}_{timeframe}"
+                catalog[dataset_id] = DatasetInfo(
+                    id=dataset_id,
+                    asset=asset,
+                    timeframe=timeframe,
+                    source="cycle",
+                    label=f"{asset.upper()} {timeframe} cycles",
+                    path=path,
+                    row_count=_read_row_count(path),
+                    child_timeframe=_child_timeframe(timeframe),
+                )
+
+    processed_root = PROJECT_PATHS.processed_root / "context"
+    if processed_root.exists():
+        for asset_dir in sorted(processed_root.iterdir()):
+            if not asset_dir.is_dir():
+                continue
+            asset = asset_dir.name
+            for path in sorted(asset_dir.glob("timeframe_context_*.parquet")):
+                timeframe = path.stem.replace("timeframe_context_", "", 1)
+                dataset_id = f"{asset}_context_{timeframe}"
+                catalog[dataset_id] = DatasetInfo(
+                    id=dataset_id,
+                    asset=asset,
+                    timeframe=timeframe,
+                    source="context",
+                    label=f"{asset.upper()} context {timeframe}",
+                    path=path,
+                    row_count=_read_row_count(path),
+                )
+
+    if DASHBOARD_DATA_DIR.exists():
+        for path in sorted(DASHBOARD_DATA_DIR.glob("*.parquet")):
+            dataset_id = path.stem
+            if dataset_id in catalog or "_" not in dataset_id:
+                continue
+            asset, timeframe = dataset_id.split("_", 1)
+            catalog[dataset_id] = DatasetInfo(
+                id=dataset_id,
+                asset=asset,
+                timeframe=timeframe,
+                source="legacy_dashboard",
+                label=f"{asset.upper()} {timeframe} dashboard",
+                path=path,
+                row_count=_read_row_count(path),
+            )
+
+    return dict(
+        sorted(
+            catalog.items(),
+            key=lambda item: (
+                item[1].asset,
+                0 if item[1].source == "cycle" else 1,
+                _timeframe_sort_key(item[1].timeframe),
+                item[1].id,
+            ),
+        )
+    )
+
+
+def _dataset_catalog() -> dict[str, DatasetInfo]:
+    global _DATASET_CATALOG_CACHE
+    if _DATASET_CATALOG_CACHE is None:
+        _DATASET_CATALOG_CACHE = _build_dataset_catalog()
+    return _DATASET_CATALOG_CACHE
+
+
+def _get_dataset_info(dataset: str) -> DatasetInfo:
+    info = _dataset_catalog().get(dataset)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset}")
+    return info
+
+
+def _flatten_cycle_features(df: pd.DataFrame) -> pd.DataFrame:
+    if "cycle_features" not in df.columns:
+        return df
+
+    normalized = pd.json_normalize(
+        [item if isinstance(item, dict) else {} for item in df["cycle_features"]],
+        sep="__",
+    )
+    if normalized.empty:
+        return df.drop(columns=["cycle_features"])
+
+    normalized = normalized.rename(columns=lambda column: f"feature__{column}")
+    normalized.index = df.index
+    return pd.concat([df.drop(columns=["cycle_features"]), normalized], axis=1)
+
+
+def _add_cycle_derived_columns(df: pd.DataFrame, asset: str, timeframe: str) -> pd.DataFrame:
+    df["asset"] = asset
+    df["timeframe"] = timeframe
+
+    if "candle_data" in df.columns:
+        df = df.drop(columns=["candle_data"])
+
+    df = _flatten_cycle_features(df)
+
+    if {"start_date", "end_date"}.issubset(df.columns):
+        starts = pd.to_datetime(df["start_date"], errors="coerce")
+        ends = pd.to_datetime(df["end_date"], errors="coerce")
+        span_hours = (ends - starts).dt.total_seconds() / 3600.0
+        df["duration_hours"] = span_hours.astype("float32")
+        df["duration_days"] = (span_hours / 24.0).astype("float32")
+
+    if "parent_key" in df.columns:
+        df["has_parent"] = df["parent_key"].notna()
+    if "child_count" in df.columns:
+        child_numeric = pd.to_numeric(df["child_count"], errors="coerce").fillna(0)
+        df["has_children"] = child_numeric.gt(0)
+
+    if "boundary_type" in df.columns:
+        boundary_numeric = pd.to_numeric(df["boundary_type"], errors="coerce")
+        df["boundary_label"] = boundary_numeric.map(BOUNDARY_LABELS).fillna("unknown")
+
+    if "parent_assign_rule" in df.columns:
+        assign_numeric = pd.to_numeric(df["parent_assign_rule"], errors="coerce")
+        df["parent_assign_rule_label"] = assign_numeric.map(PARENT_ASSIGN_RULE_LABELS).fillna("unknown")
+
+    for type_column in ("prev_type", "parent_type", "parent_prev_type", "parent_next_type"):
+        if type_column in df.columns:
+            numeric = pd.to_numeric(df[type_column], errors="coerce")
+            df[f"{type_column}_label"] = numeric.map(TYPE_CODE_LABELS).fillna("unknown")
+
+    return df
+
+
+def _load_prepared_base_dataset(dataset: str) -> pd.DataFrame:
+    if dataset in _BASE_DATAFRAME_CACHE:
+        return _BASE_DATAFRAME_CACHE[dataset].copy()
+
+    info = _get_dataset_info(dataset)
+    df = pd.read_parquet(info.path)
+
+    if info.source == "cycle":
+        df = _add_cycle_derived_columns(df, asset=info.asset, timeframe=info.timeframe)
+    elif info.source == "context":
+        df["asset"] = info.asset
+        df["context_resolution"] = info.timeframe
+    elif "asset" not in df.columns:
+        df["asset"] = info.asset
+
+    _BASE_DATAFRAME_CACHE[dataset] = df
+    return df.copy()
+
+
+def _load_query_dataset(dataset: str) -> pd.DataFrame:
+    if dataset in _QUERY_DATAFRAME_CACHE:
+        return _QUERY_DATAFRAME_CACHE[dataset].copy()
+
+    info = _get_dataset_info(dataset)
+    base_df = _load_prepared_base_dataset(dataset)
+
+    if info.source != "cycle":
+        _QUERY_DATAFRAME_CACHE[dataset] = base_df
+        return base_df.copy()
+
+    joined = base_df.copy()
+    relation_key = "parent_key"
+
+    for parent_timeframe in _parent_timeframes(info.timeframe):
+        if relation_key not in joined.columns:
+            break
+
+        parent_dataset = f"{info.asset}_{parent_timeframe}"
+        if parent_dataset not in _dataset_catalog():
             continue
 
-        parent_meta = _load_meta(parent_dataset)
+        parent_df = _load_prepared_base_dataset(parent_dataset)
         prefix = _relation_prefix(parent_timeframe)
-        for item in parent_meta.get("fields", []):
-            cloned = dict(item)
-            cloned["field"] = f"{prefix}{item['field']}"
-            cloned["label"] = f"{parent_timeframe} / {item['label']}"
-            cloned["field_group"] = "parent_cycle"
-            cloned["category"] = f"parent_{parent_timeframe}"
-            cloned["relation_scope"] = "parent"
-            cloned["relation_timeframe"] = parent_timeframe
-            cloned["source_dataset"] = parent_dataset
-            relation_fields.append(cloned)
+        parent_df = parent_df.rename(columns={column: f"{prefix}{column}" for column in parent_df.columns})
+        joined = joined.merge(
+            parent_df,
+            how="left",
+            left_on=relation_key,
+            right_on=f"{prefix}cycle_key",
+        )
+        relation_key = f"{prefix}parent_key"
 
-    return relation_fields
+    _QUERY_DATAFRAME_CACHE[dataset] = joined
+    return joined.copy()
+
+def _coerce_datetime(series: pd.Series) -> pd.Series:
+    return pd.to_datetime(series, errors="coerce")
+
+
+def _serialize_preview(df: pd.DataFrame, limit: int) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(limit, MAX_PREVIEW_ROWS))
+    preview = df.head(safe_limit).copy()
+    for column in preview.columns:
+        if pd.api.types.is_datetime64_any_dtype(preview[column]):
+            preview[column] = preview[column].astype("string")
+    return preview.where(pd.notna(preview), None).to_dict(orient="records")
+
+
+def _serialize_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
+    safe = df.copy()
+    for column in safe.columns:
+        if pd.api.types.is_datetime64_any_dtype(safe[column]):
+            safe[column] = safe[column].astype("string")
+    return safe.where(pd.notna(safe), None).to_dict(orient="records")
+
+
+def _infer_field_group(field_name: str, relation_scope: str) -> str:
+    if field_name.startswith("feature__"):
+        return "features"
+    if field_name in {"n_up_4", "combo_4", "n_up_8", "combo_8", "major_up_count", "minor_up_count"}:
+        return "context"
+    if field_name.startswith("child_") or field_name in {"has_children", "opposite_child_ratio", "max_opposite_child_streak"}:
+        return "child_summary"
+    if field_name in {
+        "cycle_key",
+        "parent_key",
+        "prev_key",
+        "prev_type",
+        "prev_dur",
+        "prev_price_pct",
+        "parent_type",
+        "order_in_parent",
+        "total_siblings",
+        "parent_progress_at_start",
+        "parent_progress_at_end",
+        "parent_assign_rule",
+        "parent_assign_rule_label",
+        "boundary_type",
+        "boundary_label",
+        "parent_prev_key",
+        "parent_prev_type",
+        "parent_prev_type_label",
+        "parent_next_key",
+        "parent_next_type",
+        "parent_next_type_label",
+        "overlap_prev_ratio",
+        "overlap_next_ratio",
+        "has_parent",
+    }:
+        return "relationship"
+    if relation_scope == "context":
+        return "context"
+    return "base"
+
+
+def _infer_field_location(field_name: str, dataset: str) -> tuple[str, str, str | None]:
+    info = _get_dataset_info(dataset)
+    if field_name.startswith("parent_") and "__" in field_name:
+        prefix, inner = field_name.split("__", 1)
+        relation_timeframe = prefix.replace("parent_", "", 1)
+        field_group = _infer_field_group(inner, relation_scope="parent")
+        return "parent", field_group, relation_timeframe
+
+    if info.source == "context":
+        return "context", _infer_field_group(field_name, relation_scope="context"), None
+
+    return "current", _infer_field_group(field_name, relation_scope="current"), info.timeframe
+
+
+def _infer_data_type(series: pd.Series) -> str:
+    if pd.api.types.is_bool_dtype(series):
+        return "boolean"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "datetime"
+    if pd.api.types.is_numeric_dtype(series):
+        return "number"
+    return "string"
+
+
+def _field_chart_roles(data_type: str, distinct_count: int | None) -> dict[str, bool]:
+    roles = {"x": False, "y": False, "group": False, "color": False, "filter": True}
+    if data_type == "number":
+        roles["x"] = True
+        roles["y"] = True
+        if distinct_count is not None and distinct_count <= MAX_GROUPABLE_NUMERIC_VALUES:
+            roles["group"] = True
+            roles["color"] = True
+        return roles
+    if data_type == "datetime":
+        roles["x"] = True
+        return roles
+    if data_type in {"string", "boolean"}:
+        roles["group"] = True
+        roles["color"] = True
+        return roles
+    roles["filter"] = False
+    return roles
+
+
+def _field_category_label(field_name: str, field_group: str) -> str:
+    if field_group == "features" and field_name.startswith("feature__"):
+        parts = field_name.split("__")
+        return parts[1] if len(parts) > 1 else "features"
+    if field_group == "relationship":
+        return "relationships"
+    if field_group == "child_summary":
+        return "child_summary"
+    if field_group == "context":
+        return "context"
+    return "base"
+
+
+def _build_field_metadata(dataset: str, df: pd.DataFrame) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for column in df.columns:
+        if column == "candle_data":
+            continue
+
+        series = df[column]
+        if pd.api.types.is_object_dtype(series) and series.map(lambda item: isinstance(item, (dict, list, tuple))).any():
+            continue
+
+        data_type = _infer_data_type(series)
+        non_null = series.dropna()
+        distinct_count = int(non_null.nunique()) if len(non_null) else 0
+        relation_scope, field_group, relation_timeframe = _infer_field_location(column, dataset)
+        category = _field_category_label(column, field_group)
+        roles = _field_chart_roles(data_type, distinct_count)
+
+        filterable = roles["filter"]
+        filter_type = "select"
+        meta: dict[str, Any] = {
+            "field": column,
+            "label": _compact_label(column.replace("feature__", "")),
+            "field_group": field_group,
+            "category": category,
+            "data_type": data_type,
+            "null_count": int(series.isna().sum()),
+            "distinct_count": distinct_count,
+            "filterable": filterable,
+            "relation_scope": relation_scope,
+            "relation_timeframe": relation_timeframe,
+            "chart_roles": roles,
+        }
+
+        if data_type == "number":
+            numeric = pd.to_numeric(series, errors="coerce")
+            if numeric.notna().any():
+                meta["min"] = float(numeric.min())
+                meta["max"] = float(numeric.max())
+                filter_type = "range"
+            else:
+                filterable = False
+        elif data_type == "datetime":
+            dt = _coerce_datetime(series)
+            if dt.notna().any():
+                meta["min"] = str(dt.min())
+                meta["max"] = str(dt.max())
+                filter_type = "date_range"
+            else:
+                filterable = False
+        elif data_type == "boolean":
+            filter_type = "boolean"
+        else:
+            if 0 < distinct_count <= MAX_FILTER_OPTIONS:
+                meta["options"] = sorted(str(item) for item in non_null.astype(str).unique().tolist())
+            else:
+                filterable = False
+                roles["filter"] = False
+
+        meta["filterable"] = filterable
+        if filterable:
+            meta["filter_type"] = filter_type
+            if data_type == "number":
+                meta["filter_ops"] = ["between", "gte", "lte", "gt", "lt", "eq"]
+            elif data_type == "datetime":
+                meta["filter_ops"] = ["between", "gte", "lte"]
+            elif data_type == "boolean":
+                meta["filter_ops"] = ["eq", "neq"]
+            else:
+                meta["filter_ops"] = ["in", "eq", "neq"]
+        fields.append(meta)
+
+    return fields
+
+
+def _choose_default_field(fields: list[dict[str, Any]], *, role: str, preferred: list[str]) -> str:
+    role_fields = [field for field in fields if field.get("chart_roles", {}).get(role)]
+    field_map = {field["field"]: field for field in role_fields}
+    for name in preferred:
+        if name in field_map:
+            return name
+    return role_fields[0]["field"] if role_fields else ""
+
+
+def _build_analysis_presets(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    field_names = {field["field"] for field in fields}
+
+    def first_of(names: list[str]) -> str:
+        for name in names:
+            if name in field_names:
+                return name
+        return ""
+
+    presets = []
+    distribution_x = first_of([
+        "feature__change__price_pct",
+        "duration_candles",
+        "duration_hours",
+        "child_count",
+        "n_up_4",
+    ])
+    if distribution_x:
+        presets.append({
+            "key": "distribution",
+            "label": "Distribution",
+            "description": "Inspect one numeric field as a distribution.",
+            "chart_type": "histogram",
+            "x": distribution_x,
+            "y": "",
+            "group_by": "",
+            "color": "",
+            "metric": "count",
+        })
+
+    relation_group = first_of([
+        "combo_4",
+        "boundary_label",
+        "cycle_type",
+        "parent_4h__cycle_type",
+        "parent_1d__cycle_type",
+    ])
+    if relation_group:
+        presets.append({
+            "key": "relation_mix",
+            "label": "Relation Mix",
+            "description": "Compare counts or aggregates by relation or context buckets.",
+            "chart_type": "bar",
+            "x": "",
+            "y": "",
+            "group_by": relation_group,
+            "color": "",
+            "metric": "count",
+        })
+
+    scatter_x = first_of(["parent_progress_at_start", "child_count", "duration_candles"])
+    scatter_y = first_of(["feature__change__price_pct", "feature__strength__direction_pct", "duration_hours"])
+    if scatter_x and scatter_y:
+        presets.append({
+            "key": "structure_vs_result",
+            "label": "Structure vs Result",
+            "description": "See how relation structure aligns with cycle outcome.",
+            "chart_type": "scatter",
+            "x": scatter_x,
+            "y": scatter_y,
+            "group_by": "",
+            "color": first_of(["cycle_type", "combo_4", "boundary_label"]),
+            "metric": "count",
+        })
+
+    line_y = first_of(["feature__change__price_pct", "duration_candles", "child_count"])
+    if "start_date" in field_names and line_y:
+        presets.append({
+            "key": "timeline",
+            "label": "Timeline",
+            "description": "Track a metric over time, optionally colored by regime.",
+            "chart_type": "line",
+            "x": "start_date",
+            "y": line_y,
+            "group_by": "",
+            "color": first_of(["cycle_type", "combo_4"]),
+            "metric": "count",
+        })
+
+    return presets
 
 
 def get_feature_response(dataset: str) -> dict[str, Any]:
     if dataset in _FEATURE_RESPONSE_CACHE:
         return _FEATURE_RESPONSE_CACHE[dataset]
 
-    meta = dict(_load_meta(dataset))
-    fields = list(meta.get("fields", []))
-    relation_fields = _build_relation_fields(dataset)
+    info = _get_dataset_info(dataset)
+    df = _load_query_dataset(dataset)
+    fields = _build_field_metadata(dataset, df)
+    available_parent_timeframes = sorted(
+        {
+            field["relation_timeframe"]
+            for field in fields
+            if field.get("relation_scope") == "parent" and field.get("relation_timeframe")
+        },
+        key=_timeframe_sort_key,
+    )
     payload = {
-        **meta,
-        "fields": fields + relation_fields,
-        "field_count": len(fields) + len(relation_fields),
-        "available_parent_timeframes": [item["relation_timeframe"] for item in relation_fields if item.get("field", "").endswith("__cycle_id")],
+        "dataset": info.id,
+        "label": info.label,
+        "asset": info.asset,
+        "timeframe": info.timeframe,
+        "source": info.source,
+        "row_count": int(len(df)),
+        "field_count": len(fields),
+        "fields": fields,
+        "available_parent_timeframes": available_parent_timeframes,
+        "child_timeframe": info.child_timeframe,
+        "default_chart_state": {
+            "chart_type": "histogram",
+            "x": _choose_default_field(fields, role="x", preferred=["feature__change__price_pct", "duration_candles", "start_date"]),
+            "y": _choose_default_field(fields, role="y", preferred=["feature__change__price_pct", "duration_candles", "child_count"]),
+            "group_by": _choose_default_field(fields, role="group", preferred=["cycle_type", "combo_4", "boundary_label", "category"]),
+            "color": _choose_default_field(fields, role="color", preferred=["cycle_type", "combo_4", "boundary_label", "category"]),
+            "metric": "count",
+        },
+        "analysis_presets": _build_analysis_presets(fields),
     }
     _FEATURE_RESPONSE_CACHE[dataset] = payload
     return payload
@@ -128,43 +614,6 @@ def _field_meta_map(dataset: str) -> dict[str, dict[str, Any]]:
 
 def _field_type(dataset: str, field: str) -> str:
     return _field_meta_map(dataset).get(field, {}).get("data_type", "string")
-
-
-def _load_query_dataset(dataset: str) -> pd.DataFrame:
-    if dataset in _QUERY_DATAFRAME_CACHE:
-        return _QUERY_DATAFRAME_CACHE[dataset].copy()
-
-    base_df = _load_dataset(dataset)
-    asset, timeframe = _parse_dataset_name(dataset)
-    joined = base_df.copy()
-
-    for parent_timeframe in _parent_timeframes(timeframe):
-        link_field = f"struct_parent_{parent_timeframe}_cycle_id"
-        if link_field not in joined.columns:
-            continue
-
-        parent_dataset = f"{asset}_{parent_timeframe}"
-        parent_data_path = _dataset_path(parent_dataset)
-        if not parent_data_path.exists():
-            continue
-
-        parent_df = _load_dataset(parent_dataset).copy()
-        prefix = _relation_prefix(parent_timeframe)
-        parent_df = parent_df.rename(columns={column: f"{prefix}{column}" for column in parent_df.columns})
-        joined = joined.merge(
-            parent_df,
-            how="left",
-            left_on=link_field,
-            right_on=f"{prefix}cycle_id",
-        )
-
-    _QUERY_DATAFRAME_CACHE[dataset] = joined
-    return joined.copy()
-
-
-def _coerce_datetime(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce")
-
 
 def _apply_filter(df: pd.DataFrame, condition: Any, field_meta: dict[str, dict[str, Any]]) -> pd.DataFrame:
     if condition.field not in df.columns:
@@ -208,20 +657,23 @@ def _apply_filter(df: pd.DataFrame, condition: Any, field_meta: dict[str, dict[s
             raise HTTPException(status_code=400, detail=f"Unsupported numeric op: {op}")
         return df[mask]
 
-    if data_type in {"string", "boolean"}:
-        comparable = series.astype(str) if data_type == "string" else series
-        if op == "in":
-            values = [str(item) for item in value] if data_type == "string" else value
-            mask = comparable.isin(values)
-        elif op == "eq":
-            mask = comparable == (str(value) if data_type == "string" else value)
-        elif op == "neq":
-            mask = comparable != (str(value) if data_type == "string" else value)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported categorical op: {op}")
-        return df[mask]
+    if data_type == "boolean":
+        if op == "eq":
+            return df[series == value]
+        if op == "neq":
+            return df[series != value]
+        raise HTTPException(status_code=400, detail=f"Unsupported boolean op: {op}")
 
-    return df
+    comparable = series.astype(str)
+    if op == "in":
+        mask = comparable.isin([str(item) for item in value])
+    elif op == "eq":
+        mask = comparable == str(value)
+    elif op == "neq":
+        mask = comparable != str(value)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported categorical op: {op}")
+    return df[mask]
 
 
 def apply_filters(df: pd.DataFrame, filters: list[Any], dataset: str) -> pd.DataFrame:
@@ -230,23 +682,6 @@ def apply_filters(df: pd.DataFrame, filters: list[Any], dataset: str) -> pd.Data
     for condition in filters:
         filtered = _apply_filter(filtered, condition, field_meta)
     return filtered
-
-
-def _serialize_preview(df: pd.DataFrame, limit: int) -> list[dict[str, Any]]:
-    safe_limit = max(1, min(limit, MAX_PREVIEW_ROWS))
-    preview = df.head(safe_limit).copy()
-    for column in preview.columns:
-        if pd.api.types.is_datetime64_any_dtype(preview[column]):
-            preview[column] = preview[column].astype("string")
-    return preview.where(pd.notna(preview), None).to_dict(orient="records")
-
-
-def _serialize_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
-    safe = df.copy()
-    for column in safe.columns:
-        if pd.api.types.is_datetime64_any_dtype(safe[column]):
-            safe[column] = safe[column].astype("string")
-    return safe.where(pd.notna(safe), None).to_dict(orient="records")
 
 
 def _downsample_scatter_numeric(
@@ -283,13 +718,7 @@ def _downsample_scatter_numeric(
     group_columns = ["_x_bin", "_y_bin"] + ([color] if color else [])
     aggregated = (
         sampled.groupby(group_columns, dropna=False)
-        .agg(
-            **{
-                x: (x, "mean"),
-                y: (y, "mean"),
-                "count": (y, "size"),
-            }
-        )
+        .agg(**{x: (x, "mean"), y: (y, "mean"), "count": (y, "size")})
         .reset_index()
     )
     return aggregated.drop(columns=["_x_bin", "_y_bin"], errors="ignore")
@@ -357,7 +786,6 @@ def _aggregate_metric(grouped: pd.core.groupby.generic.SeriesGroupBy, metric: st
     if metric == "sum":
         return grouped.sum()
     raise HTTPException(status_code=400, detail=f"Unsupported metric: {metric}")
-
 
 def _build_bar(df: pd.DataFrame, group_by: str, y: str | None, metric: str) -> dict[str, Any]:
     grouped_df = df.copy()
@@ -454,24 +882,24 @@ def _build_table(df: pd.DataFrame, limit: int) -> dict[str, Any]:
 
 
 def list_datasets() -> dict[str, Any]:
-    datasets = sorted(path.stem for path in DASHBOARD_DATA_DIR.glob("*.parquet"))
+    datasets = []
+    for info in _dataset_catalog().values():
+        datasets.append(
+            {
+                "id": info.id,
+                "label": info.label,
+                "asset": info.asset,
+                "timeframe": info.timeframe,
+                "source": info.source,
+                "row_count": info.row_count,
+                "child_timeframe": info.child_timeframe,
+            }
+        )
     return {"datasets": datasets}
 
 
 def get_dataset_features(dataset: str) -> dict[str, Any]:
-    payload = get_feature_response(dataset)
-    available_parent_timeframes = sorted(
-        {
-            item.get("relation_timeframe")
-            for item in payload.get("fields", [])
-            if item.get("relation_scope") == "parent" and item.get("relation_timeframe")
-        },
-        key=lambda timeframe: TIMEFRAME_ORDER.index(timeframe) if timeframe in TIMEFRAME_ORDER else 999,
-    )
-    return {
-        **payload,
-        "available_parent_timeframes": available_parent_timeframes,
-    }
+    return get_feature_response(dataset)
 
 
 def preview_dataset(dataset: str, filters: list[Any], limit: int) -> dict[str, Any]:

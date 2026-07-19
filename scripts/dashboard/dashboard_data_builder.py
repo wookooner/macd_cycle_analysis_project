@@ -13,7 +13,7 @@ PROJECT_ROOT = PROJECT_PATHS.project_root
 STRUCTURED_DIR = PROJECT_PATHS.cycle_structured_dir
 DASHBOARD_DATA_DIR = PROJECT_PATHS.dashboard_root / "candles"
 DASHBOARD_META_DIR = PROJECT_PATHS.dashboard_root / "meta"
-SUPPORTED_TIMEFRAMES = ("1m", "1h", "4h", "1d", "1w")
+SUPPORTED_TIMEFRAMES = ("1m", "15m", "1h", "4h", "1d", "1w")
 BASE_FIELDS = {
     "cycle_id",
     "asset",
@@ -293,7 +293,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeframes",
         nargs="+",
-        default=["1h", "4h", "1d", "1w"],
+        default=["15m", "1h", "4h", "1d", "1w"],
         help="Timeframes to build. Example: --timeframes 1h 4h 1d",
     )
     return parser.parse_args()

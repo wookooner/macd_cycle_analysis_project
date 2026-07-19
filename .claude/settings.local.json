@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest -xvs)",
+      "Bash(python -c \"from src.common.paths import PROJECT_PATHS; import os; files = os.listdir\\(PROJECT_PATHS.base_data_dir\\) if PROJECT_PATHS.base_data_dir.exists\\(\\) else []; print\\('\\\\n'.join\\(sorted\\(files\\)\\)\\)\")"
+    ]
+  }
+}

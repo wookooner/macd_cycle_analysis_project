@@ -29,6 +29,8 @@ _OPTIONAL_CANDLE_COLS = [
     "ppo",
     "ppo_signal",
     "ppo_hist",
+    "stoch_rsi_k",
+    "stoch_rsi_d",
     "oi",
     "oi_usd",
     "oi_change",

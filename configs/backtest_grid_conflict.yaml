@@ -1,0 +1,29 @@
+rule_names:
+  - L1_long_trend_following
+  - L4_event_based
+  - S1_short_trend_following
+  - C0_conflict_immediate_long
+  - C1_conflict_wait_1h_confirmed_long
+  - C2_conflict_4h_strong_long
+  - C3_conflict_rejection_short
+  - C4_4h_rebound_fails_in_1d_down_short
+  - C5_1d_reversal_leading_long
+stop_names:
+  - opposite_true_reversal_confirmed_close
+  - partial_tp_0.6_50_then_opposite
+  - partial_tp_0.8_50_then_opposite
+  - partial_tp_1.0_50_then_opposite
+  - partial_tp_1.2_50_then_opposite
+  - tp_sl_0.8_0.4
+  - tp_sl_1.2_0.6
+  - recent_swing_8_invalidation
+periods:
+  - 2017-2020
+  - 2021
+  - 2022
+  - 2023-2025
+  - 2026
+fee: 0.08
+slippage: 0.02
+position_size: [0.25, 0.5, 1.0]
+output_dir: ppo_mtf_conflict_chain_backtest

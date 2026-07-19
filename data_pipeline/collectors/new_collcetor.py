@@ -23,7 +23,12 @@ from binance.um_futures import UMFutures as FuturesClient
 from binance.error import ClientError
 
 from .config import *
-from data_pipeline.utils.io import atomic_write_csv, load_csv_with_recovery, prune_backup_files
+from data_pipeline.utils.io import (
+    atomic_write_csv,
+    load_csv_with_recovery,
+    prune_backup_files,
+    prune_related_generated_files,
+)
 
 
 # ─── 선물 전용 상수 ────────────────────────────────────────────────────────────
@@ -241,7 +246,7 @@ class AdvancedBTCDataCollectorV2:
         final_df['symbol'] = 'BTCUSD'
 
         # 기술적 지표 컬럼: 별도 indicator.py에서 채워짐
-        for col in ['macd', 'macd_signal', 'macd_hist', 'rsi']:
+        for col in ['macd', 'macd_signal', 'macd_hist', 'rsi', 'stoch_rsi_k', 'stoch_rsi_d']:
             final_df[col] = pd.NA
 
         self.logger.info(f"OHLCV 포맷 완료: {len(final_df)}행")
@@ -634,6 +639,27 @@ class AdvancedBTCDataCollectorV2:
         before   = len(combined)
         combined.sort_values(key_col, inplace=True, kind="stable")
 
+        if not existing_df.empty and key_col in existing_df.columns and key_col in new_df.columns:
+            existing_sorted = existing_df.sort_values(key_col, kind="stable")
+            new_sorted = new_df.sort_values(key_col, kind="stable").drop_duplicates(subset=[key_col], keep="last")
+            first_new_key = new_sorted[key_col].min()
+            last_existing_key = existing_sorted[key_col].iloc[-1]
+            if first_new_key >= last_existing_key:
+                combined = pd.concat(
+                    [existing_sorted[existing_sorted[key_col] < first_new_key], new_sorted],
+                    ignore_index=True,
+                    sort=False,
+                )
+                combined.sort_values(key_col, inplace=True, kind="stable")
+                self.logger.info(f"Fast tail merge: {before - len(combined)} duplicates removed -> {len(combined)} rows")
+
+                try:
+                    atomic_write_csv(combined, file_path)
+                    self.logger.info(f"????? {file_path} ({len(combined)}??")
+                except Exception as e:
+                    self.logger.error(f"????ㅽ뙣: {e}")
+                return
+
         def _last_non_null(series: pd.Series):
             for value in reversed(series.tolist()):
                 if pd.notna(value) and value != "":
@@ -661,6 +687,36 @@ class AdvancedBTCDataCollectorV2:
         except Exception as e:
             self.logger.warning(f"기존 파일 로드 실패 ({file_path.name}): {e}")
             return pd.DataFrame()
+
+    def _last_unix_from_csv(self, file_path: Path) -> int | None:
+        if not file_path.exists():
+            return None
+
+        try:
+            with file_path.open("r", encoding="utf-8", newline="") as handle:
+                header = [column.strip() for column in handle.readline().strip().split(",")]
+                last_line = ""
+                for line in handle:
+                    if line.strip():
+                        last_line = line.strip()
+
+            if not header or not last_line:
+                return None
+
+            values = last_line.split(",")
+            row = {
+                column: values[index].strip() if index < len(values) else ""
+                for index, column in enumerate(header)
+            }
+            for key in ("unix", "timestamp", "open_time"):
+                raw_value = row.get(key)
+                if raw_value in (None, ""):
+                    continue
+                value = int(float(raw_value))
+                return value // 1000 if value > 10_000_000_000 else value
+        except Exception as e:
+            self.logger.warning(f"Failed to read last unix from {file_path.name}: {e}")
+        return None
 
     def _normalize_external_market_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
         rename_map = {
@@ -751,6 +807,7 @@ class AdvancedBTCDataCollectorV2:
 
             self._backup_if_exists(output_path)
             os.replace(temp_path, output_path)
+            prune_related_generated_files(output_path)
             self.logger.info(f"정규화 완료: {output_path.name} ({wrote_rows} rows)")
         except Exception as e:
             if temp_path.exists():
@@ -769,8 +826,19 @@ class AdvancedBTCDataCollectorV2:
         """OHLCV + taker_buy_base + volume_delta 업데이트"""
         self.logger.info(f"===== OHLCV {timeframe} 업데이트 =====")
         if timeframe in INTRADAY_SOURCE_FILES:
-            self.sync_intraday_market_file(timeframe)
-            return
+            source_path = RAW_DATA_DIR / INTRADAY_SOURCE_FILES[timeframe]
+            output_path = RAW_DATA_DIR / DATA_FILES[timeframe]
+            source_last_unix = self._last_unix_from_csv(source_path)
+            output_last_unix = self._last_unix_from_csv(output_path)
+
+            if source_last_unix and (output_last_unix is None or source_last_unix > output_last_unix):
+                self.sync_intraday_market_file(timeframe)
+            elif source_last_unix and output_last_unix and source_last_unix < output_last_unix:
+                self.logger.info(
+                    "Intraday source %s is older than %s; preserving output and fetching Binance gap",
+                    source_path.name,
+                    output_path.name,
+                )
 
         file_path   = RAW_DATA_DIR / DATA_FILES[timeframe]
         existing_df = self._load_existing(file_path)

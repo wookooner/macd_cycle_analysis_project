@@ -1,0 +1,3 @@
+- [ai_analyst project scope](project_ai_analyst.md) — Single-agent domain engine; 4 anchor Qs; pause before paid-API re-test
+- [Anchor question baseline](project_anchor_baseline.md) — Q1/Q3/Q4 partial, Q2 near-pass as of 2026-04-19
+- [BI boundary rule](feedback_bi_boundary.md) — Generic BI belongs in Metabase+DuckDB, not in ai_analyst

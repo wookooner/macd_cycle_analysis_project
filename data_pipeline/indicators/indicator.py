@@ -37,6 +37,8 @@ class IndicatorCalculator:
             "ppo_signal",
             "ppo_hist",
             "rsi",
+            "stoch_rsi_k",
+            "stoch_rsi_d",
             "delta",
             "cvd",
             "cvd_rolling",
@@ -158,6 +160,39 @@ class IndicatorCalculator:
         self.logger.info(f"RSI 계산 완료: {df['rsi'].notna().sum()}개 값 생성")
         return df
 
+    def calculate_stoch_rsi(self, df, rsi_period=14, stoch_period=14, k_smooth=3, d_smooth=3):
+        """Stochastic RSI 지표 계산"""
+        self.logger.info(f"Stoch RSI 계산 중.. (RSI period: {rsi_period}, Stoch period: {stoch_period}, K smooth: {k_smooth}, D smooth: {d_smooth})")
+
+        if "close" not in df.columns:
+            self.logger.error("close 컬럼이 없습니다.")
+            return df
+
+        if "rsi" not in df.columns:
+            self.logger.info("RSI 컬럼이 없으므로 먼저 RSI를 계산합니다.")
+            df = self.calculate_rsi(df, period=rsi_period)
+
+        rsi = df["rsi"].copy()
+
+        lowest_rsi = rsi.rolling(window=stoch_period, min_periods=stoch_period).min()
+        highest_rsi = rsi.rolling(window=stoch_period, min_periods=stoch_period).max()
+
+        denominator = highest_rsi - lowest_rsi
+        denominator = denominator.replace(0, np.nan)
+
+        stoch_rsi_raw = ((rsi - lowest_rsi) / denominator) * 100
+
+        k_line = stoch_rsi_raw.rolling(window=k_smooth, min_periods=k_smooth).mean()
+        d_line = k_line.rolling(window=d_smooth, min_periods=d_smooth).mean()
+
+        df["stoch_rsi_k"] = k_line.round(2)
+        df["stoch_rsi_d"] = d_line.round(2)
+
+        valid_k = df["stoch_rsi_k"].notna().sum()
+        valid_d = df["stoch_rsi_d"].notna().sum()
+        self.logger.info(f"Stoch RSI 계산 완료: K={valid_k}개, D={valid_d}개 값 생성")
+        return df
+
     def calculate_ma(self, df, periods=(7, 25, 99)):
         """이동평균(SMA) 계산. 이미 존재하고 마지막 값까지 유효하면 건너뜀."""
         if "close" not in df.columns:
@@ -243,6 +278,16 @@ class IndicatorCalculator:
             or status["rsi"]["coverage_ratio"] < 0.5
         )
 
+        stoch_rsi_recalc_needed = (
+            force_recalculate
+            or not status["stoch_rsi_k"]["exists"]
+            or not status["stoch_rsi_d"]["exists"]
+            or status["stoch_rsi_k"]["coverage_ratio"] < 0.5
+            or status["stoch_rsi_d"]["coverage_ratio"] < 0.5
+            or status["stoch_rsi_k"].get("last_n_coverage", 0) < 1.0
+            or status["stoch_rsi_d"].get("last_n_coverage", 0) < 1.0
+        )
+
         cvd_recalc_needed = (
             force_recalculate
             or not status["cvd"]["exists"]
@@ -258,6 +303,11 @@ class IndicatorCalculator:
         else:
             self.logger.info(f"마지막 {recalc_last_n}개 데이터의 지표를 재계산합니다.")
             df = self.recalculate_last_indicators(df, recalc_last_n, cvd_rolling_period)
+
+        if full_recalc_needed or stoch_rsi_recalc_needed:
+            df = self.calculate_stoch_rsi(df)
+        else:
+            self.logger.info("Stoch RSI: 기존 값 유지 (재계산 불필요)")
 
         if cvd_recalc_needed:
             df = self.calculate_cvd(df, rolling_period=cvd_rolling_period)
@@ -276,17 +326,21 @@ class IndicatorCalculator:
             df = self.calculate_macd(df)
             df = self.calculate_ppo(df)
             df = self.calculate_rsi(df)
+            df = self.calculate_stoch_rsi(df)
             return df
 
         macd_recalc_start = max(0, total_rows - max(last_n, 60))
         rsi_recalc_start = max(0, total_rows - max(last_n, 30))
+        stoch_recalc_start = max(0, total_rows - max(last_n, 40))
 
         self.logger.info(f"MACD/PPO 재계산 구간: {macd_recalc_start}~{total_rows}")
         self.logger.info(f"RSI 재계산 구간: {rsi_recalc_start}~{total_rows}")
+        self.logger.info(f"Stoch RSI 재계산 구간: {stoch_recalc_start}~{total_rows}")
 
         df_temp = self.calculate_macd(df.copy())
         df_temp = self.calculate_ppo(df_temp)
         df_temp = self.calculate_rsi(df_temp)
+        df_temp = self.calculate_stoch_rsi(df_temp)
 
         df.loc[macd_recalc_start:, ["macd", "macd_signal", "macd_hist"]] = df_temp.loc[
             macd_recalc_start:, ["macd", "macd_signal", "macd_hist"]
@@ -295,6 +349,9 @@ class IndicatorCalculator:
             macd_recalc_start:, ["ppo", "ppo_signal", "ppo_hist"]
         ]
         df.loc[rsi_recalc_start:, "rsi"] = df_temp.loc[rsi_recalc_start:, "rsi"]
+        df.loc[stoch_recalc_start:, ["stoch_rsi_k", "stoch_rsi_d"]] = df_temp.loc[
+            stoch_recalc_start:, ["stoch_rsi_k", "stoch_rsi_d"]
+        ]
 
         df = self.calculate_cvd(df, rolling_period=cvd_rolling_period)
 

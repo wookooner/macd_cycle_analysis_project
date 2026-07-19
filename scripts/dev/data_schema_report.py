@@ -426,7 +426,7 @@ def summarize_context(asset: str) -> dict[str, Any]:
     if not ctx_dir.exists():
         return result
 
-    # ── cycle_dim ─────────────────────────────────────────────────────────────
+    # cycle_dim
     dim_path = ctx_dir / "cycle_dim.parquet"
     if dim_path.exists():
         schema = _parquet_schema_summary(dim_path)
@@ -445,7 +445,7 @@ def summarize_context(asset: str) -> dict[str, Any]:
             "timeframe_distribution": {tf: tf_dist.get(tf, 0) for tf in TIMEFRAME_ORDER if tf in tf_dist},
         }
 
-    # ── timeframe_context files ───────────────────────────────────────────────
+    # timeframe_context files
     for freq in ("1min", "1h"):
         ctx_path = ctx_dir / f"timeframe_context_{freq}.parquet"
         key = f"timeframe_context_{freq}"
@@ -475,7 +475,7 @@ def summarize_context(asset: str) -> dict[str, Any]:
             "sample": sample_info,
         }
 
-    # ── context_meta.json ────────────────────────────────────────────────────
+    # context_meta.json
     meta_path = ctx_dir / "context_meta.json"
     if meta_path.exists():
         try:

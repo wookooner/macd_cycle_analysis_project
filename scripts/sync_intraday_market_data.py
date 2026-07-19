@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from data_pipeline.collectors.config import INTRADAY_SOURCE_FILES, RAW_DATA_DIR, DATA_FILES
 from data_pipeline.collectors.new_collcetor import AdvancedBTCDataCollectorV2
 from data_pipeline.indicators.indicator import IndicatorCalculator

@@ -42,6 +42,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from src.common.paths import PROJECT_PATHS
+from data_pipeline.utils.io import atomic_write_csv, prune_backup_files
 
 # ── 경로 설정 ──────────────────────────────────────────────────────────────────
 BASE_DIR        = PROJECT_PATHS.project_root
@@ -160,11 +161,12 @@ class GoldDataCollector:
             backup_path = BACKUP_DATA_DIR / f"{file_path.name}.backup_{ts}"
             try:
                 shutil.copy2(file_path, backup_path)
+                prune_backup_files(BACKUP_DATA_DIR)
                 self.logger.info(f"백업: {backup_path.name}")
             except Exception as e:
                 self.logger.error(f"백업 실패: {e}")
         try:
-            df.to_csv(file_path, index=False)
+            atomic_write_csv(df, file_path)
             self.logger.info(f"✅ 저장: {file_path.name} ({len(df)}행)")
         except Exception as e:
             self.logger.error(f"저장 실패: {e}")

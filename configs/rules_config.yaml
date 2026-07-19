@@ -1,0 +1,121 @@
+rules:
+  - rule_name: L1_long_trend_following
+    rule_kind: production
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate AND 1h long_bias AND 4h long_bias AND 1d not strong short
+    required_features: [candidate_direction, candidate_tf, upper_1h_hist, upper_4h_hist, upper_1d_hist, upper_1d_ppo_bin]
+    sample_min_n: 500
+    description: Trend-following long using 15m timing and 1h/4h supportive hist states.
+  - rule_name: L2_long_early_reversal
+    rule_kind: research_only
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate AND own bottom AND 1h bottom AND 1h hist improving AND 4h/1d not strong short
+    required_features: [ppo_bin, hist_bin, upper_1h_ppo_bin, upper_1h_hist_bin, upper_1h_hist_diff]
+    sample_min_n: 500
+    description: Strict early reversal long; expected to be sample constrained.
+  - rule_name: L3_long_countertrend_scalp
+    rule_kind: research_only
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long while 1h DOWN, own bottom, 1h hist improving
+    required_features: [upper_1h_cycle_direction, ppo_bin, hist_bin, upper_1h_hist_diff]
+    sample_min_n: 500
+    description: Countertrend long scalp candidate.
+  - rule_name: L4_proxy
+    rule_kind: proxy
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate where closed 1h state is already UP
+    required_features: [upper_1h_cycle_direction, upper_4h_hist]
+    sample_min_n: 500
+    description: Proxy only; not a real delayed 1h confirmation entry.
+  - rule_name: L4_event_based
+    rule_kind: production
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate observed, then enter at later 1h UP confirmed close within configured wait bars
+    required_features: [target_1h_up_confirm_time, target_1h_up_confirm_price]
+    sample_min_n: 500
+    description: Realistic 1h confirmation entry reconstructed from leading-analysis targets.
+  - rule_name: S1_short_trend_following
+    rule_kind: production
+    direction: short
+    entry_tf: 15m
+    entry_filter: 15m short candidate AND 1h short_bias AND 4h short_bias AND 1d short_bias
+    required_features: [upper_1h_hist, upper_4h_hist, upper_1d_hist]
+    sample_min_n: 500
+    description: Trend-following short.
+  - rule_name: S3_short_1d_strong_short
+    rule_kind: production
+    direction: short
+    entry_tf: mixed
+    entry_filter: 15m or 1h short candidate AND 1d strong short AND 4h short_bias
+    required_features: [candidate_tf, upper_1d_hist, upper_1d_ppo_bin, upper_4h_hist]
+    sample_min_n: 500
+    description: Short only in 1d strong short regime.
+  - rule_name: S4_short_rebound_in_downtrend
+    rule_kind: research_only
+    direction: short
+    entry_tf: mixed
+    entry_filter: 15m or 1h short candidate, 4h DOWN, 1d not strong long, price above MA25, CVD delta negative, own top
+    required_features: [upper_4h_cycle_direction, upper_1d_ppo_bin, own_distance_from_ma25, own_cvd_delta, ppo_bin, hist_bin]
+    sample_min_n: 500
+    description: Asymmetric short rule designed for rebound failures inside higher-TF downtrend.
+  - rule_name: CL1_1h_long_while_4h_down_own_extreme
+    rule_kind: research_only
+    direction: long
+    entry_tf: 1h
+    entry_filter: 1h long candidate while 4h DOWN and own PPO/HIST bottom
+    required_features: [candidate_tf, upper_4h_cycle_direction, ppo_bin, hist_bin]
+    sample_min_n: 500
+    description: Formalized 1h countertrend long in 4h DOWN condition.
+  - rule_name: C0_conflict_immediate_long
+    rule_kind: research_only
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate while 1h DOWN and 4h UP (immediate, no confirmation wait)
+    required_features: [candidate_tf, upper_1h_cycle_direction, upper_4h_cycle_direction]
+    sample_min_n: 500
+    description: Immediate long inside 15m UP / 1h DOWN / 4h UP conflict (baseline; expect noise).
+  - rule_name: C1_conflict_wait_1h_confirmed_long
+    rule_kind: production
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate while 1h DOWN and 4h UP, enter at later 1h UP confirmed close within wait_bars
+    required_features: [target_1h_up_confirm_time, target_1h_up_confirm_price, upper_4h_cycle_direction]
+    sample_min_n: 500
+    description: Conflict-state long that waits for 1h UP confirmation. Reuses L4_event_based machinery but filters on 4h UP at signal time.
+  - rule_name: C2_conflict_4h_strong_long
+    rule_kind: research_only
+    direction: long
+    entry_tf: 15m
+    entry_filter: 15m long candidate while 1h DOWN and 4h UP, 4h hist top20, 1d not strong short, then wait for 1h UP confirmation
+    required_features: [target_1h_up_confirm_time, upper_4h_hist_bin, upper_4h_hist, upper_1d_ppo_bin, upper_1d_hist]
+    sample_min_n: 500
+    description: Same as C1 but only when 4h momentum is strong (hist_bin top20) and 1d is not in strong-short regime.
+  - rule_name: C3_conflict_rejection_short
+    rule_kind: research_only
+    direction: short
+    entry_tf: 15m
+    entry_filter: 15m short candidate after a prior 15m UP failed inside 1h DOWN (rebound rejection); 4h hist weakening
+    required_features: [candidate_tf, upper_1h_cycle_direction, upper_4h_hist_diff]
+    sample_min_n: 500
+    description: Short on rejection of 15m rebound when 1h still DOWN and 4h momentum is fading.
+  - rule_name: C4_4h_rebound_fails_in_1d_down_short
+    rule_kind: research_only
+    direction: short
+    entry_tf: 1h
+    entry_filter: 1h short candidate while 4h UP and 1d DOWN with weakening 4h momentum (rebound failure inside 1d down)
+    required_features: [candidate_tf, upper_4h_cycle_direction, upper_4h_hist_diff, upper_1d_cycle_direction]
+    sample_min_n: 500
+    description: Captures the 4h rebound that fails inside 1d down — the canonical conflict-pattern short setup.
+  - rule_name: C5_1d_reversal_leading_long
+    rule_kind: research_only
+    direction: long
+    entry_tf: 15m
+    entry_filter: 4h UP, 1d DOWN with 1d hist improving, 1h confirmed UP, then long
+    required_features: [target_1h_up_confirm_time, upper_4h_cycle_direction, upper_1d_cycle_direction, upper_1d_hist_diff]
+    sample_min_n: 500
+    description: Conflict-state long that fires when 4h UP precedes a 1d UP-flip (1d hist already improving).
