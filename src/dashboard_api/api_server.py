@@ -18,6 +18,7 @@ from src.common.paths import PROJECT_PATHS
 from src.dashboard_api.base_data_api import router as base_data_router
 from src.dashboard_api.cycle_candle_api import router as cycle_candle_router
 from src.dashboard_api.data_management_api import router as data_management_router
+from src.dashboard_api.footprint_api import router as footprint_router
 from src.dashboard_api.realtime_api import create_realtime_router
 from src.dashboard_api.routes import router as dashboard_router
 from src.dashboard_api.timeframe_context_api import router as timeframe_context_router
@@ -94,6 +95,7 @@ def create_app(
     app.include_router(base_data_router)
     app.include_router(cycle_candle_router)
     app.include_router(data_management_router)
+    app.include_router(footprint_router)
     app.include_router(timeframe_context_router)
     app.include_router(create_realtime_router(websocket_manager))
     return app

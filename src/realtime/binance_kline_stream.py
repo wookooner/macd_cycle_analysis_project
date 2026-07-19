@@ -15,7 +15,7 @@ from src.realtime.event_bus import EventBus
 
 LOGGER = logging.getLogger(__name__)
 
-SUPPORTED_TIMEFRAMES = ("15m", "1h")
+SUPPORTED_TIMEFRAMES = ("5m", "15m", "1h")
 DISPLAY_TO_EXCHANGE_SYMBOL = {
     "BTCUSD": "BTCUSDT",
     "BTCUSDT": "BTCUSDT",

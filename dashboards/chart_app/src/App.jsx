@@ -7,7 +7,6 @@ import {
   CrosshairMode,
   HistogramSeries,
   LineSeries,
-  LineType,
   LineStyle,
 } from "lightweight-charts";
 import "./App.css";
@@ -17,7 +16,22 @@ const SERIES_URL = "/api/base-data/series";
 const CYCLE_FILES_URL = "/api/cycle-candles/files";
 const CYCLE_SERIES_URL = "/api/cycle-candles/series";
 const TIMEFRAME_CONTEXT_URL = "/api/timeframe-context/series";
-const TIMEFRAME_ORDER = ["1w", "1d", "4h", "1h", "15m"];
+const FOOTPRINT_DATES_URL = "/api/footprint/dates";
+const FOOTPRINT_SURFACE_URL = "/api/footprint/surface";
+// Keep this list in sync with the raw market-file names.  The file list is still
+// the source of truth, so a button is only shown when that timeframe exists.
+const TIMEFRAME_ORDER = ["1M", "1w", "1d", "4h", "1h", "30m", "15m", "5m", "1min"];
+const TIMEFRAME_LABELS = {
+  "1M": "1M",
+  "1w": "1W",
+  "1d": "1D",
+  "4h": "4h",
+  "1h": "1h",
+  "30m": "30m",
+  "15m": "15m",
+  "5m": "5m",
+  "1min": "1m",
+};
 const CONTEXT_RIBBON_TIMEFRAMES = {
   "15m": ["1d", "4h", "1h"],
   "1h": ["1d", "4h"],
@@ -29,7 +43,7 @@ const DEFAULT_CYCLE_ASSET = "btc";
 const DEFAULT_OVERLAYS = ["ma_7", "ma_25"];
 const NO_PRICE_OVERLAYS = [];
 const DEFAULT_INDICATORS = ["macd", "volume", "rsi"];
-const DEFAULT_CYCLE_INDICATORS = ["cycle_type_band", "cycle_ppo_range", "cycle_ppo_context", "cycle_shape"];
+const DEFAULT_CYCLE_INDICATORS = ["cycle_type_band", "cycle_ppo_range"];
 const VIEW_MODES = {
   TIME: "time",
   CYCLE: "cycle",
@@ -47,19 +61,27 @@ const PARENT_OVERLAY_OPTIONS = [
 ];
 const PARENT_OVERLAY_TIMEFRAMES = ["1h", "4h", "1d"];
 const INITIAL_LOAD_LIMIT = 1600;
+// The latest 1h candles currently extend beyond the latest OI snapshot.  Load a
+// little more history so the most recent available OI is not hidden by the tail
+// window.  Other timeframes fit in the normal initial window.
+const OI_HISTORY_LOAD_LIMITS = { "1h": 5000 };
 const MAX_LOAD_LIMIT = Number.POSITIVE_INFINITY;
 const INITIAL_VISIBLE_BARS = 240;
 const TIME_SERIES_REFRESH_MS = 15000;
 const CYCLE_SERIES_REFRESH_MS = 60000;
 const TIME_CYCLE_CONTEXT_REFRESH_MS = 60000;
 const TIMEFRAME_CONTEXT_REFRESH_MS = 60000;
-const REALTIME_TIMEFRAMES = ["15m", "1h"];
+const REALTIME_TIMEFRAMES = ["5m", "15m", "1h"];
 const TIMEFRAME_SECONDS = {
+  "1min": 60,
+  "5m": 5 * 60,
   "15m": 15 * 60,
+  "30m": 30 * 60,
   "1h": 60 * 60,
   "4h": 4 * 60 * 60,
   "1d": 24 * 60 * 60,
   "1w": 7 * 24 * 60 * 60,
+  "1M": 30 * 24 * 60 * 60,
 };
 const STORAGE_KEY = "tv-dashboard-preferences-v1";
 
@@ -177,58 +199,10 @@ const CYCLE_INDICATOR_DEFS = [
       { key: "end_ppo_signal", label: "End Signal", color: "#f59e0b", type: "line" },
     ],
   },
-  {
-    key: "cycle_ppo_context",
-    label: "PPO Context Rank",
-    stretch: 0.82,
-    referenceLines: [-0.5, 0, 0.5],
-    series: [
-      { key: "ppo_hist_rank_score", label: "Hist Rank", type: "histogram" },
-      { key: "ppo_rank_score", label: "PPO Rank", color: "#2dd4bf", type: "line", lineWidth: 2 },
-      { key: "parent_1d_ppo_rank_score", label: "1D PPO Rank", color: "#5eead4", type: "line", lineStyle: LineStyle.Dotted, lineWidth: 2, lineType: LineType.WithSteps },
-      { key: "parent_1w_ppo_rank_score", label: "1W PPO Rank", color: "#a7f3d0", type: "line", lineStyle: LineStyle.Dashed, lineWidth: 3, lineType: LineType.WithSteps },
-    ],
-  },
-  {
-    key: "area_ppo_hist",
-    label: "PPO Hist Area",
-    stretch: 0.8,
-    referenceLines: [0],
-    series: [{ key: "area_ppo_hist", label: "Area", type: "histogram" }],
-  },
-  {
-    key: "cycle_shape",
-    label: "Cycle Shape",
-    stretch: 0.85,
-    referenceLines: [0],
-    series: [
-      { key: "cycle_return_pct", label: "Return %", type: "histogram" },
-      { key: "cycle_range_pct", label: "Range %", color: "#a78bfa", type: "line" },
-      { key: "direction_strength_pct", label: "Strength %", color: "#fbbf24", type: "line" },
-    ],
-  },
-  {
-    key: "cycle_momentum_delta",
-    label: "Cycle Momentum Delta",
-    stretch: 0.85,
-    referenceLines: [0],
-    series: [
-      { key: "ppo_delta", label: "PPO Δ", type: "histogram" },
-      { key: "ppo_hist_delta", label: "Hist Δ", color: "#2dd4bf", type: "line" },
-      { key: "rsi_delta", label: "RSI Δ", color: "#c084fc", type: "line" },
-      { key: "cvd_rolling_delta", label: "CVD Δ", color: "#22d3ee", type: "line" },
-    ],
-  },
-  {
-    key: "duration_candles",
-    label: "Duration",
-    stretch: 0.65,
-    series: [{ key: "duration_candles", label: "Bars", color: "#93c5fd", type: "histogram" }],
-  },
 ];
 
 function parseFileName(fileName) {
-  const match = /^(?<symbol>[A-Z0-9]+)_(?<timeframe>1w|1d|4h|1h|15m)\.csv$/i.exec(fileName);
+  const match = /^(?<symbol>[A-Z0-9]+)_(?<timeframe>1M|1w|1d|4h|1h|30m|15m|5m|1min)\.csv$/.exec(fileName);
   if (!match?.groups) return null;
   return { symbol: match.groups.symbol.toUpperCase(), timeframe: match.groups.timeframe, fileName };
 }
@@ -749,12 +723,18 @@ function TradingChart({
   priceOverlays,
   indicatorPanels,
   realtimeCandle,
+  realtimeFootprint,
+  historicalFootprint,
+  showFootprint,
   onNearHistoryStart,
   onHoverRowChange,
 }) {
   const hostRef = useRef(null);
   const tooltipRef = useRef(null);
   const parentOverlayRef = useRef(null);
+  const footprintOverlayRef = useRef(null);
+  const footprintDetailRef = useRef(null);
+  const priceScaleOverlayRef = useRef(null);
   const contextRibbonRef = useRef(null);
   const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
@@ -770,6 +750,7 @@ function TradingChart({
   const visibleTimeRangeRef = useRef(null);
   const hasInitializedRangeRef = useRef(false);
   const parentOverlayFrameRef = useRef(null);
+  const footprintSnapshotRef = useRef(null);
   const handleHoverRowChange = useEffectEvent((row) => {
     onHoverRowChange(row);
   });
@@ -1016,6 +997,179 @@ function TradingChart({
 
     layer.replaceChildren(...nodes);
   });
+  const renderFootprintSurface = useEffectEvent(() => {
+    const chart = chartRef.current;
+    const layer = footprintOverlayRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const snapshot = footprintSnapshotRef.current;
+    if (!chart || !layer || !candleSeries || !showFootprint || viewMode !== VIEW_MODES.TIME) return;
+
+    layer.replaceChildren();
+    const bars = Array.isArray(snapshot?.bars) ? snapshot.bars : [];
+    if (!bars.length) return;
+
+    const timeScale = chart.timeScale();
+    const chartSeconds = TIMEFRAME_SECONDS[timeframe] ?? 60;
+    const coordinateForTime = (unix) => {
+      const exact = timeScale.timeToCoordinate(unix);
+      if (exact != null) return exact;
+      return timeScale.timeToCoordinate(Math.floor(unix / chartSeconds) * chartSeconds);
+    };
+    const maxVolume = Math.max(1, ...bars.flatMap((bar) => (bar.levels ?? []).map((level) => Number(level.totalVolume) || 0)));
+    const nodes = [];
+
+    bars.forEach((bar, index) => {
+      const startUnix = Math.floor(Number(bar.barStartMs) / 1000);
+      const endUnix = Math.floor(Number(bar.barEndMs) / 1000);
+      const startX = coordinateForTime(startUnix);
+      const endX = coordinateForTime(endUnix);
+      if (startX == null) return;
+
+      const followingBar = bars[index + 1];
+      const followingX = followingBar ? coordinateForTime(Math.floor(Number(followingBar.barStartMs) / 1000)) : null;
+      const width = Math.max(5, Math.min(84, Math.abs(endX ?? followingX ?? startX + 28 - startX) - 2 || 28));
+      const showValues = width >= 24;
+
+      (bar.levels ?? []).forEach((level) => {
+        if (!(Number(level.totalVolume) > 0)) return;
+        const price = Number(level.price);
+        const y = candleSeries.priceToCoordinate(price);
+        const nextY = candleSeries.priceToCoordinate(price + Number(snapshot.priceBinSize ?? 0));
+        if (y == null) return;
+        const height = Math.max(5, Math.min(30, Math.abs((nextY ?? y - 12) - y) - 1 || 12));
+        const node = document.createElement("div");
+        const direction = Number(level.delta) > 0 ? "flow-footprint-cell--buy" : Number(level.delta) < 0 ? "flow-footprint-cell--sell" : "";
+        node.className = `flow-footprint-cell ${direction} ${level.isPoc ? "flow-footprint-cell--poc" : ""} ${level.buyImbalance ? "flow-footprint-cell--buy-imbalance" : ""} ${level.sellImbalance ? "flow-footprint-cell--sell-imbalance" : ""}`;
+        node.style.left = `${startX - width / 2}px`;
+        node.style.top = `${y - height / 2}px`;
+        node.style.width = `${width}px`;
+        node.style.height = `${height}px`;
+        node.style.setProperty("--flow-intensity", String(Math.max(0.12, Number(level.totalVolume) / maxVolume)));
+        node.title = `${formatFootprintBarTime(Number(bar.barStartMs))} · ${formatNumber(price)} | Sell ${formatNumber(level.sellVolume)} / Buy ${formatNumber(level.buyVolume)} / Δ ${formatNumber(level.delta)}`;
+        if (showValues) {
+          const sell = document.createElement("span");
+          sell.textContent = formatNumber(level.sellVolume);
+          const buy = document.createElement("b");
+          buy.textContent = formatNumber(level.buyVolume);
+          node.append(sell, buy);
+        }
+        nodes.push(node);
+      });
+    });
+    layer.replaceChildren(...nodes);
+  });
+  const renderFootprintDetail = useEffectEvent((time, point) => {
+    const layer = footprintDetailRef.current;
+    const snapshot = footprintSnapshotRef.current;
+    const host = hostRef.current;
+    if (!layer || !host || !showFootprint || viewMode !== VIEW_MODES.TIME || !time || !point) {
+      layer?.replaceChildren();
+      if (layer) layer.style.opacity = "0";
+      return;
+    }
+
+    const targetMs = Number(time) * 1000;
+    const bars = Array.isArray(snapshot?.bars) ? snapshot.bars : [];
+    const bar = bars.find((item) => Number(item.barStartMs) <= targetMs && targetMs < Number(item.barEndMs))
+      ?? bars.reduce((closest, item) => {
+        if (!closest) return item;
+        return Math.abs(Number(item.barStartMs) - targetMs) < Math.abs(Number(closest.barStartMs) - targetMs) ? item : closest;
+      }, null);
+    if (!bar || Math.abs(Number(bar.barStartMs) - targetMs) > 60_000) {
+      layer.replaceChildren();
+      layer.style.opacity = "0";
+      return;
+    }
+    const levels = (bar?.levels ?? []).filter((level) => Number(level.totalVolume) > 0).sort((left, right) => Number(right.price) - Number(left.price));
+    if (!levels.length) {
+      layer.replaceChildren();
+      layer.style.opacity = "0";
+      return;
+    }
+
+    const maxSideVolume = Math.max(1, ...levels.flatMap((level) => [Number(level.sellVolume) || 0, Number(level.buyVolume) || 0]));
+    const profile = document.createElement("div");
+    profile.className = "footprint-hover-profile__card";
+    const header = document.createElement("div");
+    header.className = "footprint-hover-profile__header";
+    header.textContent = `${formatFootprintBarTime(Number(bar.barStartMs))} UTC · Sell / Price / Buy`;
+    profile.appendChild(header);
+
+    const rows = document.createElement("div");
+    rows.className = "footprint-hover-profile__rows";
+    levels.forEach((level) => {
+      const row = document.createElement("div");
+      row.className = `footprint-hover-profile__row ${level.isPoc ? "footprint-hover-profile__row--poc" : ""} ${level.buyImbalance ? "footprint-hover-profile__row--buy-imbalance" : ""} ${level.sellImbalance ? "footprint-hover-profile__row--sell-imbalance" : ""}`;
+      const sell = document.createElement("i");
+      sell.className = "footprint-hover-profile__sell";
+      sell.style.setProperty("--profile-width", `${(Number(level.sellVolume || 0) / maxSideVolume) * 100}%`);
+      sell.textContent = formatNumber(Number(level.sellVolume));
+      sell.title = `Sell ${formatNumber(level.sellVolume)}`;
+      const price = document.createElement("b");
+      price.textContent = formatNumber(Number(level.price));
+      const buy = document.createElement("i");
+      buy.className = "footprint-hover-profile__buy";
+      buy.style.setProperty("--profile-width", `${(Number(level.buyVolume || 0) / maxSideVolume) * 100}%`);
+      buy.textContent = formatNumber(Number(level.buyVolume));
+      buy.title = `Buy ${formatNumber(level.buyVolume)}`;
+      row.append(sell, price, buy);
+      rows.appendChild(row);
+    });
+    profile.appendChild(rows);
+    const footer = document.createElement("div");
+    footer.className = "footprint-hover-profile__footer";
+    footer.textContent = `POC ${formatNumber(levels.find((level) => level.isPoc)?.price)} · Δ ${formatNumber(bar.delta)}`;
+    profile.appendChild(footer);
+    layer.replaceChildren(profile);
+
+    const panelWidth = 310;
+    const panelHeight = Math.min(510, 58 + levels.length * 16);
+    const left = point.x + panelWidth + 20 <= host.clientWidth ? point.x + 16 : Math.max(8, point.x - panelWidth - 16);
+    const top = Math.max(8, Math.min(point.y - panelHeight / 2, host.clientHeight - panelHeight - 8));
+    layer.style.left = `${left}px`;
+    layer.style.top = `${top}px`;
+    layer.style.opacity = "1";
+  });
+  const renderChartPriceScale = useEffectEvent(() => {
+    const layer = priceScaleOverlayRef.current;
+    const candleSeries = candleSeriesRef.current;
+    const range = visibleRangeRef.current;
+    const sourceRows = latestRowsRef.current;
+    if (!layer || !candleSeries || !sourceRows.length) return;
+
+    layer.replaceChildren();
+    const from = Math.max(0, Math.floor(range?.from ?? Math.max(0, sourceRows.length - INITIAL_VISIBLE_BARS)));
+    const to = Math.min(sourceRows.length, Math.ceil(range?.to ?? sourceRows.length));
+    const visibleRows = sourceRows.slice(from, to).filter((row) => Number.isFinite(row?.high) && Number.isFinite(row?.low));
+    if (!visibleRows.length) return;
+    const low = Math.min(...visibleRows.map((row) => row.low));
+    const high = Math.max(...visibleRows.map((row) => row.high));
+    const span = Math.max(high - low, Math.abs(high) * 0.0001, 1);
+    const roughStep = span / 7;
+    const power = 10 ** Math.floor(Math.log10(roughStep));
+    const normalized = roughStep / power;
+    const step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * power;
+    const labels = [];
+    for (let price = Math.ceil(low / step) * step; price <= high + step * 0.001; price += step) {
+      const y = candleSeries.priceToCoordinate(price);
+      if (y == null) continue;
+      const label = document.createElement("span");
+      label.className = "chart-price-axis__tick";
+      label.textContent = formatNumber(price);
+      label.style.top = `${y}px`;
+      labels.push(label);
+    }
+    const latest = sourceRows.at(-1);
+    const latestY = candleSeries.priceToCoordinate(latest?.close);
+    if (latestY != null) {
+      const lastLabel = document.createElement("span");
+      lastLabel.className = `chart-price-axis__last ${latest.close >= latest.open ? "chart-price-axis__last--up" : "chart-price-axis__last--down"}`;
+      lastLabel.textContent = formatNumber(latest.close);
+      lastLabel.style.top = `${latestY}px`;
+      labels.push(lastLabel);
+    }
+    layer.replaceChildren(...labels);
+  });
   const findCycleContextForTime = useEffectEvent((time) => {
     if (time == null) return null;
     return cycleContextRowsRef.current.find((cycle) => {
@@ -1028,6 +1182,8 @@ function TradingChart({
     if (typeof window === "undefined") {
       renderParentOverlay();
       renderContextRibbons();
+      renderFootprintSurface();
+      renderChartPriceScale();
       return;
     }
     if (parentOverlayFrameRef.current != null) return;
@@ -1035,6 +1191,8 @@ function TradingChart({
       parentOverlayFrameRef.current = null;
       renderParentOverlay();
       renderContextRibbons();
+      renderFootprintSurface();
+      renderChartPriceScale();
     });
   });
   const applySeriesData = useEffectEvent((rowsToApply) => {
@@ -1126,6 +1284,7 @@ function TradingChart({
           : baseLatestRow;
       syncLegends(latestRow);
       if (tooltipRef.current) tooltipRef.current.style.opacity = "0";
+      renderFootprintDetail(null, null);
       return;
     }
 
@@ -1147,6 +1306,7 @@ function TradingChart({
       tooltipRef.current.style.opacity = "1";
       tooltipRef.current.style.transform = `translate(${Math.min(param.point.x + 14, hostRef.current.clientWidth - 260)}px, ${Math.max(param.point.y - 34, 8)}px)`;
     }
+    renderFootprintDetail(param.time, param.point);
   });
   const handleVisibleRangeChange = useEffectEvent((range) => {
     if (!range) return;
@@ -1199,6 +1359,20 @@ function TradingChart({
   }, [timeframeContextRows]);
 
   useEffect(() => {
+    // Historical aggTrades are preferred whenever the user selected a window.
+    // The realtime stream remains a fallback while a historical request loads.
+    footprintSnapshotRef.current = historicalFootprint ?? realtimeFootprint;
+    scheduleParentOverlayRender();
+  }, [historicalFootprint, realtimeFootprint, showFootprint]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.applyOptions({ timeScale: { barSpacing: 8 } });
+    scheduleParentOverlayRender();
+  }, [showFootprint]);
+
+  useEffect(() => {
     hasInitializedRangeRef.current = false;
     visibleRangeRef.current = null;
     visibleTimeRangeRef.current = null;
@@ -1232,6 +1406,13 @@ function TradingChart({
         horzLine: { color: "rgba(154, 164, 183, 0.28)", width: 1, style: LineStyle.LargeDashed, labelVisible: true },
       },
       rightPriceScale: {
+        visible: true,
+        autoScale: true,
+        alignLabels: true,
+        entireTextOnly: true,
+        ticksVisible: true,
+        minimumWidth: 76,
+        borderVisible: true,
         borderColor: "rgba(66, 77, 102, 0.58)",
       },
       timeScale: {
@@ -1497,6 +1678,9 @@ function TradingChart({
       <div className="chart-canvas-area">
         <div ref={hostRef} className="tv-chart-host" />
         <div ref={parentOverlayRef} className="parent-cycle-overlay" />
+        <div ref={footprintOverlayRef} className="flow-footprint-overlay" />
+        <div ref={footprintDetailRef} className="footprint-hover-profile" />
+        <div ref={priceScaleOverlayRef} className="chart-price-axis" />
         <div ref={tooltipRef} className="chart-hover-tooltip" />
       </div>
     </div>
@@ -1505,50 +1689,201 @@ function TradingChart({
 
 function normalizeRealtimeFootprint(event) {
   if (event?.type !== "footprint_update" || !event.data || !Array.isArray(event.data.levels)) return null;
-  const levels = event.data.levels
+  const normalizeLevels = (rawLevels) => rawLevels
     .map((level) => ({
       price: Number(level.price),
       buyVolume: Number(level.buyVolume),
       sellVolume: Number(level.sellVolume),
       delta: Number(level.delta),
       totalVolume: Number(level.totalVolume),
+      isPoc: Boolean(level.isPoc),
+      buyImbalance: Boolean(level.buyImbalance),
+      sellImbalance: Boolean(level.sellImbalance),
     }))
-    .filter((level) => Object.values(level).every((value) => Number.isFinite(value)));
+    .filter((level) => [level.price, level.buyVolume, level.sellVolume, level.delta, level.totalVolume].every(Number.isFinite));
+  const levels = normalizeLevels(event.data.levels);
   if (!levels.length) return null;
+  const bars = (Array.isArray(event.data.bars) ? event.data.bars : [event.data])
+    .map((bar) => ({
+      ...bar,
+      barStartMs: Number(bar.barStartMs),
+      barEndMs: Number(bar.barEndMs),
+      delta: Number(bar.delta ?? 0),
+      totalVolume: Number(bar.totalVolume ?? 0),
+      levels: normalizeLevels(bar.levels ?? []),
+    }))
+    .filter((bar) => Number.isFinite(bar.barStartMs) && bar.levels.length);
   return {
-    data: { ...event.data, levels },
+    data: { ...event.data, levels, bars },
     subscriptionKey: `${event.displaySymbol ?? event.symbol}:${event.timeframe}`.toUpperCase(),
   };
 }
 
+function formatFootprintBarTime(value) {
+  if (!Number.isFinite(value)) return "-";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 function FootprintPanel({ snapshot, visible }) {
   if (!visible) return null;
-  const levels = snapshot?.levels ?? [];
-  const maxVolume = Math.max(1, ...levels.map((level) => level.totalVolume));
+  const bars = snapshot?.bars?.length ? snapshot.bars : snapshot?.levels?.length ? [snapshot] : [];
+  const levels = [...new Set(bars.flatMap((bar) => bar.levels.map((level) => level.price)))].sort((left, right) => right - left);
+  const maxVolume = Math.max(1, ...bars.flatMap((bar) => bar.levels.map((level) => level.totalVolume)));
+  const levelFor = (bar, price) => bar.levels.find((level) => level.price === price);
+  const gridStyle = { gridTemplateColumns: `64px repeat(${Math.max(1, bars.length)}, minmax(92px, 1fr))` };
   return (
-    <aside className="footprint-panel" aria-label="Realtime footprint">
+    <aside className="footprint-panel" aria-label="Realtime footprint surface">
       <div className="footprint-panel__header">
-        <span>Footprint · {snapshot?.priceBinSize ?? "-"} USDT bins</span>
-        <span>{snapshot ? `${snapshot.tradeCount} agg trades` : "Waiting for trades"}</span>
+        <span>Footprint Surface · {snapshot?.priceBinSize ?? "-"} USDT bins</span>
+        <span>{snapshot ? `${snapshot.tradeCount} trades · POC ${formatNumber(bars.at(-1)?.pocPrice)}` : "Waiting for trades"}</span>
       </div>
-      <div className="footprint-panel__columns">
-        <span>Sell</span><span>Price</span><span>Buy</span><span>Δ</span>
+      <div className="footprint-surface-scroll">
+        <div className="footprint-surface" style={gridStyle}>
+          <div className="footprint-surface__corner">Price</div>
+          {bars.map((bar) => <div className="footprint-surface__bar-header" key={bar.barStartMs}>{formatFootprintBarTime(bar.barStartMs)}<small>Δ {formatNumber(bar.delta)}</small></div>)}
+          {levels.map((price) => [
+            <div className="footprint-surface__price" key={`price-${price}`}>{formatNumber(price)}</div>,
+            ...bars.map((bar) => {
+              const level = levelFor(bar, price);
+              const intensity = level ? Math.max(0.08, level.totalVolume / maxVolume) : 0;
+              const direction = level?.delta > 0 ? "footprint-cell--buy" : level?.delta < 0 ? "footprint-cell--sell" : "";
+              return (
+                <div
+                  className={`footprint-cell ${direction} ${level?.isPoc ? "footprint-cell--poc" : ""} ${level?.buyImbalance ? "footprint-cell--buy-imbalance" : ""} ${level?.sellImbalance ? "footprint-cell--sell-imbalance" : ""}`}
+                  key={`${bar.barStartMs}-${price}`}
+                  style={{ "--footprint-intensity": intensity }}
+                  title={level ? `${formatFootprintBarTime(bar.barStartMs)} · ${formatNumber(price)} | Sell ${formatNumber(level.sellVolume)} / Buy ${formatNumber(level.buyVolume)} / Δ ${formatNumber(level.delta)}` : undefined}
+                >
+                  {level ? <><span>{formatNumber(level.sellVolume)}</span><b>{formatNumber(level.buyVolume)}</b></> : null}
+                </div>
+              );
+            }),
+          ])}
+        </div>
       </div>
-      <div className="footprint-panel__levels">
-        {levels.map((level) => {
-          const buyWidth = `${Math.max(4, (level.buyVolume / maxVolume) * 100)}%`;
-          const sellWidth = `${Math.max(4, (level.sellVolume / maxVolume) * 100)}%`;
-          const deltaClass = level.delta > 0 ? "footprint-level__delta--buy" : level.delta < 0 ? "footprint-level__delta--sell" : "";
-          return (
-            <div className="footprint-level" key={level.price}>
-              <span className="footprint-level__volume footprint-level__volume--sell"><i style={{ width: sellWidth }} />{formatNumber(level.sellVolume)}</span>
-              <span className="footprint-level__price">{formatNumber(level.price)}</span>
-              <span className="footprint-level__volume footprint-level__volume--buy"><i style={{ width: buyWidth }} />{formatNumber(level.buyVolume)}</span>
-              <span className={`footprint-level__delta ${deltaClass}`}>{formatNumber(level.delta)}</span>
-            </div>
-          );
-        })}
-      </div>
+    </aside>
+  );
+}
+
+function footprintSurfaceToSnapshot(surface) {
+  if (!surface?.meta || !Array.isArray(surface.timeSlots) || !Array.isArray(surface.cells)) return null;
+  const cellsByTime = new Map();
+  surface.cells.forEach((cell) => {
+    const index = Number(cell.timeIndex);
+    if (!cellsByTime.has(index)) cellsByTime.set(index, []);
+    cellsByTime.get(index).push(cell);
+  });
+  const bars = surface.timeSlots.map((slot, index) => {
+    const levels = (cellsByTime.get(index) ?? []).sort((left, right) => Number(right.price) - Number(left.price));
+    return {
+      barStartMs: Date.parse(slot),
+      barEndMs: Date.parse(slot) + 60_000,
+      levels,
+      totalVolume: levels.reduce((sum, level) => sum + Number(level.totalVolume || 0), 0),
+      delta: levels.reduce((sum, level) => sum + Number(level.delta || 0), 0),
+    };
+  });
+  return {
+    priceBinSize: Number(surface.meta.tick),
+    bars,
+    tradeCount: Number(surface.meta.windowTradeCount),
+  };
+}
+
+function FootprintWorkspace({ visible, symbol, onSurfaceChange }) {
+  const aggTradeSymbol = symbol === "BTCUSD" ? "BTCUSDT" : symbol;
+  const [availableDates, setAvailableDates] = useState([]);
+  const [sessionDate, setSessionDate] = useState("");
+  const [start, setStart] = useState("00:00");
+  const [minutes, setMinutes] = useState(20);
+  const [tick, setTick] = useState(5);
+  const [surface, setSurface] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    let cancelled = false;
+    async function loadDates() {
+      try {
+        const response = await fetch(`${FOOTPRINT_DATES_URL}?symbol=${encodeURIComponent(aggTradeSymbol)}`);
+        if (!response.ok) throw new Error("Footprint 날짜 목록을 불러오지 못했습니다.");
+        const payload = await response.json();
+        const dates = payload.dates ?? [];
+        if (cancelled) return;
+        setAvailableDates(dates);
+        setSessionDate((current) => {
+          if (dates.includes(current)) return current;
+          setStart(payload.latestStart ?? "00:00");
+          return dates.at(-1) ?? "";
+        });
+      } catch (loadError) {
+        if (!cancelled) setError(loadError.message);
+      }
+    }
+    loadDates();
+    return () => { cancelled = true; };
+  }, [aggTradeSymbol, visible]);
+
+  useEffect(() => {
+    if (!visible || !sessionDate) return undefined;
+    let cancelled = false;
+    async function loadSurface() {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({
+          symbol: aggTradeSymbol,
+          date: sessionDate,
+          start,
+          minutes: String(minutes),
+          tick: String(tick),
+        });
+        const response = await fetch(`${FOOTPRINT_SURFACE_URL}?${params}`);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail ?? "Footprint 데이터를 불러오지 못했습니다.");
+        if (!cancelled) {
+          setSurface(payload);
+          onSurfaceChange(footprintSurfaceToSnapshot(payload));
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setSurface(null);
+          onSurfaceChange(null);
+          setError(loadError.message);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    loadSurface();
+    return () => { cancelled = true; };
+  }, [aggTradeSymbol, minutes, onSurfaceChange, refreshKey, sessionDate, start, tick, visible]);
+
+  function shiftWindow(direction) {
+    if (!sessionDate) return;
+    const windowStart = new Date(`${sessionDate}T${start}:00Z`);
+    windowStart.setUTCMinutes(windowStart.getUTCMinutes() + direction * Number(minutes));
+    setSessionDate(windowStart.toISOString().slice(0, 10));
+    setStart(windowStart.toISOString().slice(11, 16));
+  }
+
+  if (!visible) return null;
+  const quality = surface?.meta?.quality;
+  return (
+    <aside className="footprint-chart-controls" aria-label="Footprint controls">
+      <strong>Footprint</strong>
+      <span>red sell · blue buy · gold POC</span>
+      <label>Date<input type="date" list="footprint-dates" value={sessionDate} onChange={(event) => setSessionDate(event.target.value)} /></label>
+      <datalist id="footprint-dates">{availableDates.map((item) => <option value={item} key={item} />)}</datalist>
+      <label>UTC<input type="time" step="60" value={start} onChange={(event) => setStart(event.target.value)} /></label>
+      <label>Min<input type="number" min="1" max="240" value={minutes} onChange={(event) => setMinutes(Math.max(1, Math.min(240, Number(event.target.value) || 1)))} /></label>
+      <label>Tick<input type="number" min="0.01" step="1" value={tick} onChange={(event) => setTick(Math.max(0.01, Number(event.target.value) || 5))} /></label>
+      <button type="button" onClick={() => shiftWindow(-1)}>←</button>
+      <button type="button" onClick={() => setRefreshKey((value) => value + 1)}>Go</button>
+      <button type="button" onClick={() => shiftWindow(1)}>→</button>
+      <small>{loading ? "Loading…" : error || (surface ? `${surface.meta.windowTradeCount.toLocaleString()} trades · buy ${((quality?.buyRatioMin ?? 0) * 100).toFixed(0)}–${((quality?.buyRatioMax ?? 0) * 100).toFixed(0)}%` : "Select a window")}</small>
     </aside>
   );
 }
@@ -1612,7 +1947,8 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [realtimeCandle, setRealtimeCandle] = useState(null);
   const [realtimeFootprint, setRealtimeFootprint] = useState(null);
-  const [showFootprint, setShowFootprint] = useState(() => getInitialPreference("showFootprint", true));
+  const [historicalFootprint, setHistoricalFootprint] = useState(null);
+  const [showFootprint, setShowFootprint] = useState(false);
   const [realtimeStatus, setRealtimeStatus] = useState("idle");
   const [reloadNonce, setReloadNonce] = useState(0);
   const frameRef = useRef(null);
@@ -1746,7 +2082,11 @@ export default function App() {
         const params =
           viewMode === VIEW_MODES.CYCLE
             ? new URLSearchParams({ asset: selectedFile.asset, timeframe: selectedFile.timeframe, limit: String(loadLimit), refresh: String(Date.now()) })
-            : new URLSearchParams({ file: selectedFile.fileName, limit: String(loadLimit), refresh: String(Date.now()) });
+            : new URLSearchParams({
+                file: selectedFile.fileName,
+                limit: String(Math.max(loadLimit, OI_HISTORY_LOAD_LIMITS[selectedTimeframe] ?? 0)),
+                refresh: String(Date.now()),
+              });
         const url = viewMode === VIEW_MODES.CYCLE ? CYCLE_SERIES_URL : SERIES_URL;
         const response = await fetch(`${url}?${params.toString()}`);
         if (!response.ok) {
@@ -2037,7 +2377,7 @@ export default function App() {
 
             <div className="timeframe-strip">
               {TIMEFRAME_ORDER.filter((timeframe) => availableTimeframes.includes(timeframe)).map((timeframe) => (
-                <TimeframeButton key={timeframe} label={timeframe.toUpperCase()} active={selectedTimeframe === timeframe} onClick={() => setSelectedTimeframe(timeframe)} />
+                <TimeframeButton key={timeframe} label={TIMEFRAME_LABELS[timeframe] ?? timeframe} active={selectedTimeframe === timeframe} onClick={() => setSelectedTimeframe(timeframe)} />
               ))}
             </div>
 
@@ -2087,7 +2427,6 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={showFootprint}
-                  disabled={!REALTIME_TIMEFRAMES.includes(selectedTimeframe)}
                   onChange={() => setShowFootprint((current) => !current)}
                 />
                 <span>Footprint</span>
@@ -2126,7 +2465,7 @@ export default function App() {
               <span>C {formatNumber(hoveredRow?.close)}</span>
               {viewMode === VIEW_MODES.CYCLE ? <span>PPO {formatNumber(hoveredRow?.start_ppo)}-&gt;{formatNumber(hoveredRow?.end_ppo)}</span> : null}
               {viewMode === VIEW_MODES.TIME && REALTIME_TIMEFRAMES.includes(selectedTimeframe) ? <span>WS {realtimeStatus}</span> : null}
-              {viewMode === VIEW_MODES.TIME && showFootprint && REALTIME_TIMEFRAMES.includes(selectedTimeframe) ? <span>FP {realtimeFootprint ? realtimeFootprint.tradeCount : "-"}</span> : null}
+              {viewMode === VIEW_MODES.TIME && showFootprint ? <span>FP heatmap</span> : null}
               <span>Rows {rows.length}/{totalRowCount}</span>
             </div>
             <button type="button" className="toolbar-button" onClick={toggleFullscreen}>
@@ -2150,6 +2489,9 @@ export default function App() {
               priceOverlays={viewMode === VIEW_MODES.TIME ? priceOverlays : NO_PRICE_OVERLAYS}
               indicatorPanels={indicatorPanels}
               realtimeCandle={realtimeCandle}
+              realtimeFootprint={realtimeFootprint}
+              historicalFootprint={historicalFootprint}
+              showFootprint={showFootprint}
               onHoverRowChange={setHoveredRow}
               onNearHistoryStart={() => {
                 if (rows.length < totalRowCount && loadLimit < MAX_LOAD_LIMIT) {
@@ -2160,10 +2502,7 @@ export default function App() {
           ) : (
             <div className="chart-status">No chart data</div>
           )}
-          <FootprintPanel
-            snapshot={realtimeFootprint}
-            visible={viewMode === VIEW_MODES.TIME && showFootprint && REALTIME_TIMEFRAMES.includes(selectedTimeframe)}
-          />
+          <FootprintWorkspace visible={viewMode === VIEW_MODES.TIME && showFootprint} symbol={selectedSymbol} onSurfaceChange={setHistoricalFootprint} />
         </div>
       </section>
     </div>

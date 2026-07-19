@@ -20,7 +20,11 @@ LOGGER = logging.getLogger(__name__)
 
 BINANCE_FUTURES_WS_URL = "wss://fstream.binancefuture.com/stream?streams={streams}"
 DISPLAY_SYMBOLS = {"BTCUSDT": "BTCUSD"}
-FOOTPRINT_TIMEFRAMES = {"15m": 15 * 60 * 1000, "1h": 60 * 60 * 1000}
+FOOTPRINT_TIMEFRAMES = {
+    "5m": 5 * 60 * 1000,
+    "15m": 15 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+}
 
 
 def normalize_agg_trade(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -61,8 +65,9 @@ class FootprintAggregator:
         self,
         symbol: str,
         timeframe: str,
-        price_bin_size: float = 5.0,
-        max_price_levels: int = 72,
+        price_bin_size: float = 20.0,
+        max_price_levels: int = 48,
+        history_bars: int = 10,
     ) -> None:
         if timeframe not in FOOTPRINT_TIMEFRAMES:
             raise ValueError(f"Unsupported footprint timeframe: {timeframe}")
@@ -73,6 +78,7 @@ class FootprintAggregator:
         self.interval_ms = FOOTPRINT_TIMEFRAMES[timeframe]
         self.price_bin_size = price_bin_size
         self.max_price_levels = max_price_levels
+        self.history_bars = max(2, history_bars)
         self._bars: dict[int, _FootprintBar] = {}
 
     def ingest(self, trade: dict[str, Any]) -> None:
@@ -101,18 +107,34 @@ class FootprintAggregator:
         if not bar:
             return None
 
-        prices = sorted(bar.levels)
-        if len(prices) > self.max_price_levels and bar.last_price is not None:
-            insert_at = bisect.bisect_left(prices, bar.last_price)
-            lower = max(0, insert_at - self.max_price_levels // 2)
-            upper = min(len(prices), lower + self.max_price_levels)
-            lower = max(0, upper - self.max_price_levels)
-            prices = prices[lower:upper]
+        visible_bars = [self._bars[key] for key in sorted(self._bars)[-self.history_bars :]]
+        surface_prices = self._select_surface_prices(visible_bars, bar.last_price)
+        bars = [self._serialize_bar(item, surface_prices) for item in visible_bars]
+        current_bar = next((item for item in bars if item["barStartMs"] == bar.start_ms), bars[-1])
+        return {
+            "barStartMs": current_bar["barStartMs"],
+            "barEndMs": current_bar["barEndMs"],
+            "priceBinSize": self.price_bin_size,
+            "lastPrice": current_bar["lastPrice"],
+            "tradeCount": current_bar["tradeCount"],
+            "levels": current_bar["levels"],
+            "bars": bars,
+        }
 
-        levels = []
+    def _select_surface_prices(self, bars: list[_FootprintBar], anchor_price: float | None) -> list[float]:
+        prices = sorted({price for bar in bars for price in bar.levels})
+        if len(prices) <= self.max_price_levels or anchor_price is None:
+            return prices
+        insert_at = bisect.bisect_left(prices, anchor_price)
+        lower = max(0, insert_at - self.max_price_levels // 2)
+        upper = min(len(prices), lower + self.max_price_levels)
+        return prices[max(0, upper - self.max_price_levels) : upper]
+
+    def _serialize_bar(self, bar: _FootprintBar, prices: list[float]) -> dict[str, Any]:
+        raw_levels = []
         for price in reversed(prices):
-            buy_volume, sell_volume = bar.levels[price]
-            levels.append(
+            buy_volume, sell_volume = bar.levels.get(price, (0.0, 0.0))
+            raw_levels.append(
                 {
                     "price": price,
                     "buyVolume": buy_volume,
@@ -121,19 +143,27 @@ class FootprintAggregator:
                     "totalVolume": buy_volume + sell_volume,
                 }
             )
+        point_of_control = max(raw_levels, key=lambda level: level["totalVolume"], default=None)
+        for level in raw_levels:
+            buy_volume = level["buyVolume"]
+            sell_volume = level["sellVolume"]
+            level["isPoc"] = bool(point_of_control and level["price"] == point_of_control["price"] and level["totalVolume"] > 0)
+            level["buyImbalance"] = buy_volume > 0 and buy_volume >= sell_volume * 3
+            level["sellImbalance"] = sell_volume > 0 and sell_volume >= buy_volume * 3
         return {
             "barStartMs": bar.start_ms,
             "barEndMs": bar.start_ms + self.interval_ms,
-            "priceBinSize": self.price_bin_size,
             "lastPrice": bar.last_price,
             "tradeCount": bar.trade_count,
-            "levels": levels,
+            "totalVolume": sum(level["totalVolume"] for level in raw_levels),
+            "delta": sum(level["delta"] for level in raw_levels),
+            "pocPrice": point_of_control["price"] if point_of_control and point_of_control["totalVolume"] > 0 else None,
+            "levels": raw_levels,
         }
 
     def _drop_old_bars(self, current_start_ms: int) -> None:
-        # Retain current + previous completed bar for short reconnects, never an
-        # unbounded history in the realtime API process.
-        cutoff = current_start_ms - self.interval_ms
+        # Retain a compact rolling surface, never an unbounded in-memory tape.
+        cutoff = current_start_ms - self.interval_ms * (self.history_bars - 1)
         for start_ms in list(self._bars):
             if start_ms < cutoff:
                 del self._bars[start_ms]

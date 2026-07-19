@@ -9,7 +9,7 @@
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import time
 from pathlib import Path
 import logging
@@ -41,6 +41,11 @@ OI_PERIOD_MAP = {
     "1h": "1h",
     "4h": "4h",
     "1d": "1d",
+}
+OI_PERIOD_SECONDS = {
+    "1h": 60 * 60,
+    "4h": 4 * 60 * 60,
+    "1d": 24 * 60 * 60,
 }
 
 # 펀딩비는 8시간마다 정산되므로 하루 3번. API limit 최대 1000
@@ -907,8 +912,27 @@ class AdvancedBTCDataCollectorV2:
             start_fetch = start_dt
         else:
             # OI 히스토리는 최근 30일만 가능하므로 30일 전부터 시작
-            from datetime import timedelta
             start_fetch = datetime.now(timezone.utc) - timedelta(days=30)
+
+        # Binance provides OI history only for a rolling window.  Requesting
+        # from an old local timestamp returns no usable rows, leaving the
+        # dashboard permanently stale. Resume from the earliest retrievable
+        # timestamp when the local series has fallen behind.
+        # Stay inside the documented 30-day window by a full day.  The API
+        # rejects boundary requests when start/end differ by even a few ms.
+        earliest_available = datetime.now(timezone.utc) - timedelta(days=29)
+        if start_fetch < earliest_available:
+            self.logger.warning(
+                "OI %s is older than Binance's rolling window; resuming from %s",
+                period,
+                earliest_available.isoformat(),
+            )
+            start_fetch = earliest_available
+        period_seconds = OI_PERIOD_SECONDS[period]
+        start_fetch = datetime.fromtimestamp(
+            int(start_fetch.timestamp()) // period_seconds * period_seconds,
+            tz=timezone.utc,
+        )
 
         raw_df = self._fetch_oi_history(period, start_fetch, datetime.now(timezone.utc))
         if raw_df is None:
