@@ -1,4 +1,4 @@
-# MACD Cycle Analysis
+# ss MACD Cycle Analysis
 
 This repository is being reorganized into a code-first research workspace.
 
